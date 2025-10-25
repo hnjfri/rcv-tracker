@@ -1,0 +1,49 @@
+---
+alwaysApply: true
+priority: medium
+---
+
+# Documentation Update Rule
+
+Significant code changes must be accompanied by corresponding documentation updates to maintain project clarity and consistency.
+
+## Requirements
+
+### Main README Updates
+All significant code changes must include updates to the main `README.md` file:
+
+- **New features**: Add to "Recent Updates" section with clear description
+- **Performance improvements**: Document the impact and benefits
+- **Database schema changes**: Update relevant sections
+- **CLI changes**: Update usage examples and command descriptions
+- **Major bug fixes**: Note in changelog or updates section
+
+### Migrations README Updates
+All changes to database views must include updates to `migrations/README.md`:
+
+- **New views**: Document purpose, structure, and usage
+- **View modifications**: Update descriptions and column explanations
+- **Calculated fields**: Document logic and business rules
+- **Performance optimizations**: Note the improvements made
+- **Helper tables**: Explain their purpose and maintenance
+
+## Examples
+
+**✅ Good:**
+- Adding party vote count fields → Update both README files
+- Creating new helper table → Document in migrations README
+- Performance optimization → Note in main README "Recent Updates"
+
+**❌ Bad:**
+- Adding complex calculated fields without documentation
+- Creating new views without explaining their purpose
+- Performance improvements without noting the benefits
+
+## Documentation Standards
+
+1. **Clear and concise**: Explain what changed and why
+2. **User-focused**: Focus on benefits and usage, not just technical details
+3. **Consistent formatting**: Follow existing documentation style
+4. **Timely**: Update documentation as part of the same commit/change
+
+This rule ensures the project remains well-documented and accessible to all users and contributors.

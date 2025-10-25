@@ -1,0 +1,479 @@
+---
+alwaysApply: true
+priority: high
+context: ["data-validation", "input-sanitization", "type-safety"]
+---
+
+# Data Validation and Schema Standards
+
+All data inputs, outputs, and transformations must be validated to ensure system reliability and prevent errors from propagating through the application.
+
+## MANDATORY CHECKPOINT: Before processing any external data
+
+### Data Validation Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "What could go wrong with this data, and how do I validate it?"
+
+**Required Analysis - Check ALL 6 areas:**
+1. **Input boundaries** - What are the valid ranges, formats, and constraints for this data?
+2. **Type safety** - Are data types validated and converted properly?
+3. **Schema compliance** - Does the data match expected structure and format?
+4. **Business rules** - Does the data satisfy domain-specific requirements?
+5. **Security concerns** - Could malicious data cause harm or injection attacks?
+6. **Error handling** - How should invalid data be handled and reported?
+
+**Required Response:**
+- If critical validation missing → **IMPLEMENT VALIDATION BEFORE PROCEEDING**
+- If validation incomplete → **ENHANCE VALIDATION COVERAGE**
+- If comprehensive validation exists → **PROCEED with processing**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory data validation assessment"
+- "Data validation is [comprehensive/adequate/incomplete]"
+- "Based on this assessment, I am [implementing validation/enhancing/proceeding]"
+
+## Core Data Validation Requirements
+
+### A. Input Validation at System Boundaries
+**DO:**
+- Validate all data entering the system from external sources
+- Check data types, ranges, and formats at entry points
+- Sanitize user inputs to prevent injection attacks
+- Provide clear error messages for invalid inputs
+
+**DON'T:**
+- Trust any external data without validation
+- Validate data deep inside the system instead of at boundaries
+- Allow invalid data to propagate through the system
+- Provide generic error messages that don't help users
+
+**Example:**
+```python
+# Good: Comprehensive input validation
+from typing import Optional, List, Dict, Any
+from pathlib import Path
+import re
+
+class InputValidator:
+    """Validates all external inputs to the system."""
+    
+    @staticmethod
+    def validate_file_path(file_path: str, allowed_extensions: List[str] = None) -> Path:
+        """Validate and normalize file path input."""
+        if not file_path or not isinstance(file_path, str):
+            raise ValidationError("File path must be a non-empty string")
+        
+        # Convert to Path object and resolve
+        try:
+            path = Path(file_path).resolve()
+        except (OSError, ValueError) as e:
+            raise ValidationError(f"Invalid file path format: {file_path}") from e
+        
+        # Check if file exists
+        if not path.exists():
+            raise ValidationError(f"File does not exist: {path}")
+        
+        # Check if it's actually a file
+        if not path.is_file():
+            raise ValidationError(f"Path is not a file: {path}")
+        
+        # Validate file extension if specified
+        if allowed_extensions:
+            if path.suffix.lower() not in [ext.lower() for ext in allowed_extensions]:
+                raise ValidationError(
+                    f"File must have one of these extensions: {allowed_extensions}. "
+                    f"Got: {path.suffix}"
+                )
+        
+        # Check file size (prevent processing extremely large files)
+        max_size_mb = 100
+        file_size_mb = path.stat().st_size / (1024 * 1024)
+        if file_size_mb > max_size_mb:
+            raise ValidationError(
+                f"File too large: {file_size_mb:.1f}MB. Maximum allowed: {max_size_mb}MB"
+            )
+        
+        return path
+    
+    @staticmethod
+    def validate_question(question: str) -> str:
+        """Validate user question input."""
+        if not question or not isinstance(question, str):
+            raise ValidationError("Question must be a non-empty string")
+        
+        # Remove excessive whitespace
+        question = question.strip()
+        
+        if len(question) < 3:
+            raise ValidationError("Question must be at least 3 characters long")
+        
+        if len(question) > 1000:
+            raise ValidationError("Question must be less than 1000 characters")
+        
+        # Check for potentially malicious patterns
+        suspicious_patterns = [
+            r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>',  # Script tags
+            r'javascript:',  # JavaScript URLs
+            r'data:text/html',  # Data URLs
+        ]
+        
+        for pattern in suspicious_patterns:
+            if re.search(pattern, question, re.IGNORECASE):
+                raise ValidationError("Question contains potentially unsafe content")
+        
+        return question
+    
+    @staticmethod
+    def validate_database_name(db_name: str) -> str:
+        """Validate database name for safety."""
+        if not db_name or not isinstance(db_name, str):
+            raise ValidationError("Database name must be a non-empty string")
+        
+        # Sanitize database name
+        db_name = db_name.strip()
+        
+        # Check for valid characters (alphanumeric, underscore, hyphen)
+        if not re.match(r'^[a-zA-Z0-9_-]+$', db_name):
+            raise ValidationError(
+                "Database name can only contain letters, numbers, underscores, and hyphens"
+            )
+        
+        if len(db_name) > 50:
+            raise ValidationError("Database name must be less than 50 characters")
+        
+        return db_name
+```
+
+### B. Type Safety and Schema Validation
+**DO:**
+- Use type hints throughout the codebase
+- Validate data structures match expected schemas
+- Convert data types explicitly with error handling
+- Use dataclasses or Pydantic for complex data validation
+
+**DON'T:**
+- Rely on duck typing for critical data structures
+- Skip type conversion validation
+- Assume data will always match expected types
+- Mix validation logic throughout the codebase
+
+**Example:**
+```python
+# Good: Strong typing with validation
+from dataclasses import dataclass
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+
+@dataclass
+class ArticleData:
+    """Validated article data structure."""
+    title: str
+    content: str
+    source: str
+    date_published: Optional[datetime] = None
+    metadata: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        """Validate data after initialization."""
+        self.validate()
+    
+    def validate(self) -> None:
+        """Validate all fields meet business requirements."""
+        # Title validation
+        if not self.title or not isinstance(self.title, str):
+            raise ValidationError("Article title must be a non-empty string")
+        
+        if len(self.title.strip()) < 5:
+            raise ValidationError("Article title must be at least 5 characters")
+        
+        if len(self.title) > 500:
+            raise ValidationError("Article title must be less than 500 characters")
+        
+        # Content validation
+        if not self.content or not isinstance(self.content, str):
+            raise ValidationError("Article content must be a non-empty string")
+        
+        if len(self.content.strip()) < 50:
+            raise ValidationError("Article content must be at least 50 characters")
+        
+        # Source validation
+        if not self.source or not isinstance(self.source, str):
+            raise ValidationError("Article source must be a non-empty string")
+        
+        # Clean up whitespace
+        self.title = self.title.strip()
+        self.content = self.content.strip()
+        self.source = self.source.strip()
+
+class ArticleValidator:
+    """Validates articles from various sources."""
+    
+    @staticmethod
+    def validate_docx_extraction(raw_data: Dict[str, Any]) -> ArticleData:
+        """Validate and convert raw docx extraction data."""
+        try:
+            # Handle missing or None values
+            title = raw_data.get('title', '').strip() if raw_data.get('title') else ''
+            content = raw_data.get('content', '').strip() if raw_data.get('content') else ''
+            source = raw_data.get('source', '').strip() if raw_data.get('source') else 'Unknown'
+            
+            # Convert date if present
+            date_published = None
+            if raw_data.get('date'):
+                date_published = ArticleValidator._parse_date(raw_data['date'])
+            
+            return ArticleData(
+                title=title,
+                content=content,
+                source=source,
+                date_published=date_published,
+                metadata=raw_data.get('metadata', {})
+            )
+        
+        except Exception as e:
+            raise ValidationError(f"Failed to validate article data: {e}") from e
+    
+    @staticmethod
+    def _parse_date(date_str: Any) -> Optional[datetime]:
+        """Parse date from various formats."""
+        if not date_str:
+            return None
+        
+        if isinstance(date_str, datetime):
+            return date_str
+        
+        if not isinstance(date_str, str):
+            return None
+        
+        # Try common date formats
+        date_formats = [
+            '%Y-%m-%d',
+            '%Y-%m-%d %H:%M:%S',
+            '%m/%d/%Y',
+            '%d/%m/%Y',
+        ]
+        
+        for fmt in date_formats:
+            try:
+                return datetime.strptime(date_str.strip(), fmt)
+            except ValueError:
+                continue
+        
+        return None  # Could not parse date
+```
+
+### C. Database Data Validation
+**DO:**
+- Validate data before database operations
+- Use parameterized queries to prevent SQL injection
+- Check foreign key constraints and relationships
+- Validate data types match database schema
+
+**DON'T:**
+- Insert unvalidated data into database
+- Skip constraint checking
+- Assume database will catch all validation errors
+- Use string concatenation for SQL queries
+
+**Example:**
+```python
+# Good: Database validation with proper error handling
+class DatabaseValidator:
+    """Validates data for database operations."""
+    
+    @staticmethod
+    def validate_article_for_storage(article: ArticleData, db_connection) -> None:
+        """Validate article before database insertion."""
+        
+        # Check for duplicate articles (business rule)
+        if DatabaseValidator._is_duplicate_article(article, db_connection):
+            raise ValidationError(f"Duplicate article detected: {article.title[:50]}...")
+        
+        # Validate content length for database storage
+        max_content_length = 1_000_000  # 1MB text limit
+        if len(article.content) > max_content_length:
+            raise ValidationError(
+                f"Article content too long for storage: {len(article.content)} chars. "
+                f"Maximum: {max_content_length} chars"
+            )
+        
+        # Validate source exists and is valid
+        if not DatabaseValidator._is_valid_source(article.source, db_connection):
+            raise ValidationError(f"Invalid or unregistered source: {article.source}")
+    
+    @staticmethod
+    def _is_duplicate_article(article: ArticleData, db_connection) -> bool:
+        """Check if article already exists in database."""
+        cursor = db_connection.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM original_articles WHERE title = ? AND source = ?",
+            (article.title, article.source)
+        )
+        count = cursor.fetchone()[0]
+        return count > 0
+    
+    @staticmethod
+    def _is_valid_source(source: str, db_connection) -> bool:
+        """Validate that source is acceptable."""
+        # For now, accept any non-empty source
+        # Could be extended to check against whitelist
+        return bool(source and source.strip())
+
+class EmbeddingValidator:
+    """Validates embedding data."""
+    
+    @staticmethod
+    def validate_embedding_vector(embedding: List[float], expected_dim: int = 384) -> List[float]:
+        """Validate embedding vector format and dimensions."""
+        if not isinstance(embedding, list):
+            raise ValidationError("Embedding must be a list of floats")
+        
+        if len(embedding) != expected_dim:
+            raise ValidationError(
+                f"Embedding dimension mismatch. Expected: {expected_dim}, got: {len(embedding)}"
+            )
+        
+        # Check that all values are valid floats
+        try:
+            validated_embedding = []
+            for i, value in enumerate(embedding):
+                if not isinstance(value, (int, float)):
+                    raise ValidationError(f"Embedding value at index {i} is not numeric: {value}")
+                
+                float_value = float(value)
+                
+                # Check for invalid float values
+                if not (-1e6 <= float_value <= 1e6):  # Reasonable range for embeddings
+                    raise ValidationError(f"Embedding value out of range at index {i}: {float_value}")
+                
+                validated_embedding.append(float_value)
+            
+            return validated_embedding
+            
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Invalid embedding data: {e}") from e
+```
+
+### D. API Response Validation
+**DO:**
+- Validate responses from external APIs
+- Check response status codes and error conditions
+- Validate response data structure and content
+- Handle partial or malformed responses gracefully
+
+**DON'T:**
+- Assume API responses are always valid
+- Skip validation of external API data
+- Ignore API error responses
+- Process malformed API responses
+
+**Example:**
+```python
+# Good: API response validation
+class APIResponseValidator:
+    """Validates responses from external APIs."""
+    
+    @staticmethod
+    def validate_anthropic_response(response_data: Dict[str, Any]) -> str:
+        """Validate Claude API response."""
+        if not isinstance(response_data, dict):
+            raise ValidationError("API response must be a dictionary")
+        
+        # Check for error responses
+        if 'error' in response_data:
+            error_info = response_data['error']
+            error_message = error_info.get('message', 'Unknown API error')
+            raise APIError(f"Claude API error: {error_message}")
+        
+        # Validate response structure
+        if 'content' not in response_data:
+            raise ValidationError("API response missing 'content' field")
+        
+        content = response_data['content']
+        if not isinstance(content, list) or not content:
+            raise ValidationError("API response content must be a non-empty list")
+        
+        # Extract text from response
+        text_content = ""
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                text_content += item.get('text', '')
+        
+        if not text_content.strip():
+            raise ValidationError("API response contains no text content")
+        
+        # Validate response length
+        if len(text_content) > 50000:  # Reasonable limit
+            logger.warning(f"Unusually long API response: {len(text_content)} chars")
+        
+        return text_content.strip()
+    
+    @staticmethod
+    def validate_embedding_response(embedding_data: Any) -> List[float]:
+        """Validate embedding model response."""
+        if embedding_data is None:
+            raise ValidationError("Embedding response is None")
+        
+        # Handle numpy arrays
+        if hasattr(embedding_data, 'tolist'):
+            embedding_data = embedding_data.tolist()
+        
+        if not isinstance(embedding_data, list):
+            raise ValidationError(f"Embedding must be a list, got: {type(embedding_data)}")
+        
+        return EmbeddingValidator.validate_embedding_vector(embedding_data)
+```
+
+## Validation Error Handling
+
+### Custom Exception Classes
+```python
+class ValidationError(ClaudeQAError):
+    """Raised when data validation fails."""
+    def __init__(self, message: str, field_name: str = None, invalid_value: Any = None):
+        super().__init__(message)
+        self.field_name = field_name
+        self.invalid_value = invalid_value
+
+class SchemaValidationError(ValidationError):
+    """Raised when data doesn't match expected schema."""
+    pass
+
+class BusinessRuleValidationError(ValidationError):
+    """Raised when data violates business rules."""
+    pass
+```
+
+### Validation Result Patterns
+```python
+from typing import Union, List
+from dataclasses import dataclass
+
+@dataclass
+class ValidationResult:
+    """Result of validation operation."""
+    is_valid: bool
+    errors: List[str]
+    warnings: List[str]
+    validated_data: Any = None
+
+def validate_with_result(data: Any, validator_func) -> ValidationResult:
+    """Validate data and return detailed results."""
+    try:
+        validated_data = validator_func(data)
+        return ValidationResult(
+            is_valid=True,
+            errors=[],
+            warnings=[],
+            validated_data=validated_data
+        )
+    except ValidationError as e:
+        return ValidationResult(
+            is_valid=False,
+            errors=[str(e)],
+            warnings=[],
+            validated_data=None
+        )
+```
+
+This rule ensures that all data flowing through the system is properly validated, preventing errors and security issues while providing clear feedback to users and developers.

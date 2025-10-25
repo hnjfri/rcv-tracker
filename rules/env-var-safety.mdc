@@ -1,0 +1,86 @@
+---
+alwaysApply: true
+priority: high
+context: ["testing", "environment-variables", "safety", "ci"]
+---
+
+# Environment Variable Safety for Tests and Local Runs
+
+Any environment variables set for testing or ad-hoc local runs MUST be scoped and removed immediately after use. This prevents state leakage across tests, shells, or CI steps.
+
+## Mandatory Requirements
+
+- Scope env changes to a single command or test when possible
+  - Prefer process-scoped setting (e.g., runner fixtures, context managers) over session/global changes
+- If a session-scoped env variable is set (e.g., in a shell), it MUST be removed right after the command/test completes
+- Tests MUST restore the original environment regardless of pass/fail
+- CI pipelines MUST leave no env overrides behind between steps
+
+## Approved Patterns
+
+- Python tests (pytest):
+  - Use monkeypatch fixture:
+    - monkeypatch.setenv("KEY", "VALUE") and pytest will restore automatically at test end
+  - Or use context managers/try-finally to restore os.environ
+  - Or use patch.dict(os.environ, {"KEY": "VALUE"}, clear=False) within a with block
+
+- POSIX shells:
+  - Prefer per-command scoping: KEY=VALUE your_command
+  - If exported into the session: export KEY=VALUE; run command; unset KEY
+
+- Windows PowerShell:
+  - Prefer scoping to a single invocation if possible
+  - If set in session: $Env:KEY = "VALUE"; run command; Remove-Item Env:KEY
+
+## Prohibited
+
+- Leaving test-only env variables set after a test, script, or local run finishes
+- Relying on previous test shells’ env state
+
+## Code Review Checklist
+
+- Test code sets env only via monkeypatch/patch.dict or restores in finally
+- Shell scripts that set env also unset them in the same script
+- CI jobs do not rely on prior step session env unless explicitly passed as inputs
+
+## Rationale
+
+- Prevents cross-test interference and flakiness
+- Avoids accidental use of test databases or APIs
+- Ensures reproducibility across developer machines and CI
+
+## Enforcement Hooks (REQUIRED)
+
+To make this rule operational (not aspirational), projects MUST include automatic enforcement:
+
+- Test runner enforcement:
+  - Add an autouse test fixture that snapshots the environment before each test, restores it after, and fails the test if any non-ignored keys were added/removed/modified
+  - Ignore framework-managed ephemeral keys (e.g., `PYTEST_CURRENT_TEST`) in leak detection
+  - Prefer `monkeypatch.setenv` / `patch.dict(os.environ, ...)` so restoration is automatic
+
+- CI pipeline enforcement:
+  - Snapshot environment at job start and end; fail the job if diffs are present (except an explicit ignore allowlist)
+  - Scope env overrides to the individual step; do not rely on step-to-step persistence
+
+- Shell/CLI enforcement:
+  - When setting env vars for a single command, include removal in the same invocation
+  - Example (PowerShell): set; run; remove in one line
+  - Example (POSIX): prefer per-command `KEY=VALUE your_command` or `trap`-based cleanup
+
+## Windows PowerShell Implementation Pattern
+
+Always pair setting with removal in the same invocation:
+
+```
+$Env:KEY = "VALUE"; your_command_here; Remove-Item Env:KEY
+```
+
+For longer scripts, ensure a `try { ... } finally { Remove-Item Env:KEY -ErrorAction SilentlyContinue }` cleanup so failures do not skip removal.
+
+## Verification Checklist (Expanded)
+
+- Tests use `monkeypatch` or equivalent and do not mutate `os.environ` permanently
+- An autouse fixture (or equivalent) detects and fails on env leaks, restoring baseline
+- CI job compares env snapshots pre/post test execution and fails on differences
+- Shell commands that set env also remove them in the same command/script
+- Ignore only a minimal, documented allowlist of framework-managed env keys

@@ -1,0 +1,31 @@
+---
+alwaysApply: true
+priority: highest
+context: ["rules-governance", "standards", "portability"]
+---
+
+# Rules Portability and Genericity Standard
+
+All rule files in `.cursor/rules/` MUST be generic and applicable to any codebase.
+
+## Mandatory Requirements
+
+- DO NOT reference project-specific names (app names, commands, file paths, environments, API keys) in rule content
+- DO use neutral, portable terms ("the application", "the CLI", "the database", "the container")
+- DO express examples using generic placeholders where necessary (e.g., `your_command`, `your_module`, `your_database_url`)
+- DO avoid naming concrete services, endpoints, or vendors unless the guidance is vendor-agnostic and broadly applicable
+
+## Enforcement
+
+- Prior to adding or modifying any rule, verify the content contains zero project-specific references
+- Replace any discovered project-specific references with generic placeholders
+- Keep rationale and patterns technology-agnostic and industry standard
+
+## Verification Checklist
+
+- [ ] No project name references
+- [ ] No project-specific CLI commands or flags
+- [ ] No hardcoded paths unique to a repository
+- [ ] Examples use neutral placeholders
+- [ ] Guidance is applicable across multiple stacks and environments
+

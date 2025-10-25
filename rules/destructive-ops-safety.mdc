@@ -1,0 +1,81 @@
+---
+alwaysApply: true
+priority: highest
+context: ["safety", "destructive-operations", "database", "testing", "cli"]
+---
+
+# Destructive Operations Safety Policy
+
+This rule prevents accidental data loss in development, testing, and production. Any operation that deletes, truncates, or overwrites data must comply with the safeguards below.
+
+## Scope (MANDATORY)
+Destructive operations include, but are not limited to:
+- Clearing or dropping database tables, schemas, or entire databases
+- Deleting application data (bulk or per-entity) without backup
+- Overwriting datasets or files in-place
+- Bulk “reload” flows that implicitly delete existing data
+
+## Ironclad Safeguards (REQUIRED)
+
+1) Environment Opt-In
+- Require an explicit environment variable opt-in for destructive commands:
+  - `ALLOW_DB_CLEAR=true` (accepted values: true/1/yes)
+- The command must check this env at runtime and refuse to proceed if not set
+
+2) Force Flag AND Confirmation
+- Non-interactive guard: require a `--force` flag for CLI destructive operations
+- Interactive guard: if `--force` not provided, show a clear warning with counts and require a typed confirmation
+
+3) Target Validation
+- Verify the target database matches an expected safety pattern for the current environment (e.g., a dedicated test DB during tests)
+- Refuse to proceed if the URL points to a production or unspecified database while running in test mode
+
+4) Patch-Friendly Construction
+- Instantiate destructive collaborators (e.g., `DatabaseManager`) at call-site in a patchable/import-scoped manner so tests can intercept
+- Avoid creating these in module import side-effects or deep within orchestrators where patching is brittle
+
+5) Dry-Run Mode (Recommended)
+- Provide a `--dry-run` mode for destructive commands that prints intended actions and counts without executing them
+
+6) Logging & Audit
+- Log a single, structured WARNING prior to destructive execution that includes operation, target, counts, and actor/session id
+- Log final result (counts deleted) at INFO with the same correlation id
+
+## Testing Requirements
+
+- Tests MUST NEVER touch a developer’s real database
+  - Default test DB URL must be `sqlite:///:memory:` or another isolated test URL
+  - Destructive commands in tests must set `ALLOW_DB_CLEAR=true` explicitly
+  - All destructive collaborators must be patchable in tests
+
+- Tests must verify refusal behavior when `ALLOW_DB_CLEAR` is not set
+
+## CLI UX Requirements
+
+- Console messages are the UX; keep them concise and non-technical
+- Do not duplicate console messages into `logger.info` (warnings/errors may be logged)
+- Show counts and targets before prompting for confirmation
+
+## Code Review Checklist
+- [ ] Operation checks `ALLOW_DB_CLEAR` and `--force`
+- [ ] Displays counts and asks for typed confirmation when not forced
+- [ ] Constructs DB/file collaborators in a patch-friendly way at execution time
+- [ ] Includes structured WARNING before execution and INFO summary after
+- [ ] Tests cover refusal path and success path with env guard set
+
+## Example Refusal Pattern
+```python
+if os.getenv('ALLOW_DB_CLEAR', '').lower() not in ('true', '1', 'yes'):
+    logger.error("Refusing to clear database: set ALLOW_DB_CLEAR=true to enable this operation", extra={
+        'operation': 'clear_database',
+        'status': 'refused'
+    })
+    print("Refusing to clear database. Set ALLOW_DB_CLEAR=true to enable this operation.")
+    return 1
+```
+
+## Rationale
+- Prevent catastrophic data loss during development and CI
+- Ensure destructive ops are intentional, auditable, and testable
+- Preserve user trust and system integrity
+

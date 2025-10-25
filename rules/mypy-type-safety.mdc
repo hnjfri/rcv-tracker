@@ -1,0 +1,53 @@
+---
+alwaysApply: true
+priority: high
+context: ["type-safety", "static-analysis", "quality-gates"]
+---
+
+# Type Safety and Static Analysis Standard
+
+All code must use precise type hints and pass static analysis with mypy.
+
+## Requirements
+
+- Annotate all public functions, methods, and class attributes with accurate types
+- Use Optional, Union, Literal/Enum, Protocols, TypedDict, and Generics where appropriate
+- Eliminate `Any` where feasible; isolate unavoidable `Any` at boundaries (e.g., raw JSON)
+- Validate external inputs at boundaries and convert to typed structures early
+- Prefer `Path` for filesystem paths and explicit numeric/boolean types with constraints
+
+## mypy Configuration (Baseline)
+
+- A shared configuration must be kept in the repository (e.g., pyproject.toml)
+- Recommended flags:
+  - `warn_unused_ignores = true`
+  - `warn_redundant_casts = true`
+  - `warn_return_any = true`
+  - `no_implicit_optional = true`
+  - `disallow_any_generics = true`
+  - `disallow_untyped_defs = true`
+  - `disallow_incomplete_defs = true`
+  - `check_untyped_defs = true`
+  - `strict_equality = true`
+
+## Tooling and CI
+
+- mypy must run in CI prior to tests; CI fails on mypy errors
+- Provide necessary stubs for third-party packages (e.g., types-requests)
+- Use pre-commit hooks to run mypy on changed files to catch issues early
+
+## Design Guidance
+
+- Introduce `TypedDict`/dataclasses for JSON payloads and settings schemas
+- Use `Protocol` interfaces for external collaborators (DB/session, HTTP clients) to decouple and type-check contracts
+- Avoid casting; when necessary, cast only at validated boundaries
+- Keep mypy suppressions (`# type: ignore[...]`) rare and justified with a comment
+
+## Verification Checklist
+
+- [ ] No mypy errors with the repository config
+- [ ] Public APIs fully annotated
+- [ ] No unchecked `Any` in core logic
+- [ ] Third-party modules handled via stubs or overrides
+- [ ] Pre-commit and CI enforce type checks
+

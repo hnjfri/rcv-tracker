@@ -1,0 +1,253 @@
+---
+alwaysApply: true
+priority: medium
+context: ["testing", "coverage", "quality-assurance"]
+appliesTo: ["tests/**/*.py", "**/*test*.py"]
+---
+
+# Test Coverage Standards
+
+Each module must maintain at least 80% test coverage to ensure adequate testing of functionality and reduce the risk of undetected bugs.
+
+## MANDATORY CHECKPOINT: Before completing module development
+
+### Coverage Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "Does each module have adequate test coverage?"
+
+**Required Analysis - Check ALL 5 areas:**
+1. **Module coverage** - Does each individual module have at least 80% line coverage?
+2. **Critical path coverage** - Are all important code paths tested?
+3. **Edge case coverage** - Are boundary conditions and error cases tested?
+4. **Integration coverage** - Are module interactions tested?
+5. **Coverage quality** - Do tests actually verify meaningful behavior?
+
+**Required Response:**
+- If ANY module below 80% coverage → **ADD TESTS TO REACH 80% MINIMUM**
+- If coverage is superficial/meaningless → **IMPROVE TEST QUALITY**
+- If all modules meet standards → **PROCEED with confidence**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory coverage assessment"
+- "Module coverage status: [all modules ≥80%/some modules <80%]"
+- "Based on this assessment, I am [adding tests/improving quality/proceeding]"
+
+## Core Coverage Requirements
+
+### A. Module-Level Coverage Standards
+**DO:**
+- Achieve minimum 80% line coverage for each individual module
+- Measure coverage per module, not just overall project coverage
+- Focus on testing public interfaces and critical functionality
+- Include both positive and negative test cases
+
+**DON'T:**
+- Rely on overall project coverage to mask low-coverage modules
+- Write trivial tests just to increase coverage numbers
+- Ignore modules with complex business logic
+- Skip testing error handling and edge cases
+
+**Coverage Measurement:**
+```bash
+# Check coverage by module
+python -m pytest tests/ --cov=claude_word_qa --cov-report=term-missing
+
+# Generate detailed HTML coverage report
+python -m pytest tests/ --cov=claude_word_qa --cov-report=html
+
+# Check specific module coverage
+python -m pytest tests/test_specific_module.py --cov=claude_word_qa.specific_module
+```
+
+### B. Priority Coverage Areas
+**High Priority (Must exceed 80%):**
+- Core business logic modules (document processing, RAG system)
+- CLI interface and argument parsing
+- Database operations and data persistence
+- API clients and external service integration
+- Error handling and exception management
+
+**Medium Priority (Should reach 80%):**
+- Configuration management
+- Logging and monitoring utilities
+- Data validation and transformation
+- Helper functions and utilities
+
+**Lower Priority (May be below 80% temporarily):**
+- Simple data classes with minimal logic
+- Constants and configuration files
+- Deprecated code scheduled for removal
+
+### C. Coverage Quality Standards
+**DO:**
+- Test actual business logic and functionality
+- Verify correct behavior, not just code execution
+- Include tests for error conditions and edge cases
+- Test integration between modules
+
+**DON'T:**
+- Write tests that only exercise code without assertions
+- Test trivial getters/setters without business logic
+- Focus on coverage percentage over test value
+- Create tests that don't fail when bugs are introduced
+
+**Quality Coverage Example:**
+```python
+# Good: Tests meaningful behavior
+def test_document_processor_handles_invalid_file():
+    processor = DocumentProcessor()
+    
+    with pytest.raises(DocumentProcessingError) as exc_info:
+        processor.process_document("nonexistent.docx")
+    
+    assert "File does not exist" in str(exc_info.value)
+    assert processor.get_error_count() == 1
+
+# Bad: Only increases coverage without value
+def test_document_processor_init():
+    processor = DocumentProcessor()
+    assert processor is not None  # Trivial assertion
+```
+
+### D. Coverage Measurement and Reporting
+**DO:**
+- Run coverage analysis regularly during development
+- Track coverage trends over time
+- Generate detailed coverage reports showing uncovered lines
+- Review coverage reports to identify gaps
+
+**DON'T:**
+- Only check coverage at the end of development
+- Ignore coverage reports showing uncovered critical paths
+- Focus solely on percentage without examining what's uncovered
+- Allow coverage to decrease without investigation
+
+### E. Coverage Improvement Strategies
+**For Low Coverage Modules:**
+1. **Identify Critical Gaps** - Find untested important functionality
+2. **Add Focused Tests** - Write tests for specific uncovered areas
+3. **Improve Existing Tests** - Enhance tests to cover more scenarios
+4. **Refactor for Testability** - Make code easier to test if needed
+
+**For High Coverage Modules:**
+1. **Maintain Quality** - Ensure tests remain valuable as code evolves
+2. **Add Edge Cases** - Look for additional boundary conditions
+3. **Improve Integration** - Test interactions with other modules
+4. **Performance Testing** - Add tests for performance-critical paths
+
+## Module Coverage Targets
+
+### Current Module Requirements
+Each module in `claude_word_qa/` must maintain these minimum coverage levels:
+
+- **cli.py**: 80% minimum (high user interaction)
+- **cli_components.py**: 80% minimum (core CLI functionality)  
+- **rag_orchestrator.py**: 80% minimum (core business logic)
+- **providers.py**: 80% minimum (database and API operations)
+- **rag_components.py**: 80% minimum (document processing)
+- **embedding_providers.py**: 80% minimum (ML integration)
+- **anthropic_client.py**: 80% minimum (external API client)
+- **interfaces.py**: 70% minimum (mostly abstract definitions)
+- **exceptions.py**: 70% minimum (simple exception classes)
+- **logging_config.py**: 70% minimum (configuration utility)
+
+### Coverage Monitoring
+**Weekly Reviews:**
+- Check coverage reports for all modules
+- Identify modules falling below targets
+- Plan testing improvements for low-coverage areas
+
+**Release Requirements:**
+- All modules must meet minimum coverage before release
+- Coverage reports must be generated and reviewed
+- Any coverage decreases must be justified and documented
+
+## Coverage Tools and Commands
+
+### Basic Coverage Analysis
+```bash
+# Run tests with coverage
+python -m pytest tests/ --cov=claude_word_qa
+
+# Show missing lines
+python -m pytest tests/ --cov=claude_word_qa --cov-report=term-missing
+
+# Generate HTML report
+python -m pytest tests/ --cov=claude_word_qa --cov-report=html
+```
+
+### Module-Specific Coverage
+```bash
+# Check specific module
+python -m pytest tests/test_cli.py --cov=claude_word_qa.cli --cov-report=term-missing
+
+# Check multiple related modules
+python -m pytest tests/test_cli*.py --cov=claude_word_qa.cli --cov=claude_word_qa.cli_components
+```
+
+### Coverage Configuration
+```ini
+# In pyproject.toml or setup.cfg
+[tool.coverage.run]
+source = ["claude_word_qa"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "setup.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
+```
+
+## Addressing Coverage Gaps
+
+### Common Uncovered Areas
+1. **Error Handling** - Exception paths and error recovery
+2. **Edge Cases** - Boundary conditions and unusual inputs  
+3. **Integration Points** - Module interactions and data flow
+4. **Configuration** - Different settings and environment conditions
+
+### Improvement Strategies
+1. **Add Missing Tests** - Write tests for uncovered lines
+2. **Improve Test Quality** - Make existing tests more comprehensive
+3. **Refactor Code** - Split complex functions for better testability
+4. **Mock Dependencies** - Isolate units for more focused testing
+
+### Acceptable Coverage Exceptions
+- **Defensive Programming** - Error conditions that "should never happen"
+- **Platform-Specific Code** - OS-specific functionality not relevant to current environment
+- **Deprecated Code** - Code scheduled for removal (document timeline)
+- **Third-Party Integration** - Simple wrappers around external libraries
+
+## Benefits of 80% Coverage Standard
+
+1. **Bug Detection** - Catch more issues before they reach production
+2. **Refactoring Confidence** - Safe to modify code with good test coverage
+3. **Documentation** - Tests serve as executable documentation
+4. **Code Quality** - Writing testable code improves design
+5. **Maintenance** - Easier to maintain code with comprehensive tests
+
+## Implementation Guidelines
+
+### For New Modules
+- Write tests alongside development to reach 80% coverage
+- Focus on testing public interfaces and critical paths
+- Include error handling and edge case tests
+
+### For Existing Modules
+- Measure current coverage and identify gaps
+- Prioritize testing critical functionality first
+- Gradually improve coverage through targeted test additions
+
+### For Legacy Code
+- Assess risk vs. effort for adding tests
+- Focus on areas that change frequently
+- Consider refactoring to improve testability
+
+This rule ensures comprehensive testing while maintaining focus on valuable, behavior-driven tests rather than just achieving coverage metrics.

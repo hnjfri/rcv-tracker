@@ -1,0 +1,83 @@
+---
+alwaysApply: true
+priority: critical
+---
+
+# PRIORITY RULE: No Emoji Characters
+
+Do not use emoji characters anywhere in any output, including code files, terminal output, status messages, user feedback, conversational responses, or any other content. This rule takes precedence over visual appeal or common coding patterns.
+
+## Scope
+
+This rule applies to all output types:
+- All Python source code files
+- README files (main and migrations)
+- Documentation files
+- Configuration files
+- Comments and docstrings
+- Log messages
+- Error messages
+- Success messages
+- Terminal output
+- User interface text
+- Conversational responses
+- Status indicators
+- File contents
+
+## Required Alternatives
+
+Always use text-based indicators instead:
+- [SUCCESS] or [OK] instead of ✅
+- [ERROR] or [FAIL] instead of ❌  
+- [WARNING] or [WARN] instead of ⚠️
+- [INFO] instead of ℹ️
+- [HOT] instead of 🔥
+- [LIST] instead of 📋
+- [FOLDER] instead of 📁
+- Use plain text descriptors for any other symbols
+
+## Examples
+
+**FORBIDDEN:**
+- `print("✅ Success!")`
+- `logger.info("🎉 Data loaded successfully")`
+- `# 🚀 Performance optimization`
+- `"Operation completed successfully! 🎯"`
+- `print("❌ Failed to drop view")`
+- `"⚠️ WARNING: This will permanently drop all views!"`
+
+**REQUIRED:**
+- `print("[SUCCESS] Operation completed!")`
+- `logger.info("Data loaded successfully")`
+- `# Performance optimization`
+- `"Operation completed successfully!"`
+- `print("[ERROR] Failed to drop view")`
+- `"[WARNING] This will permanently drop all views!"`
+
+## Enforcement & Verification
+
+**Mandatory Verification Checkpoint:** Before completing any task, scan all output for Unicode emoji symbols (including but not limited to ✅❌⚠️🔥📋📁💡🎯🚀⭐🔍📊🗄️📈🔧) and replace them with text equivalents.
+
+**Priority Override:** This rule takes precedence over:
+- Visual appeal considerations
+- Common coding patterns that use emojis
+- Popular library conventions
+- User interface design preferences
+
+**Verification Process:**
+- Always perform a final check of every file creation, code output, and response
+- Ensure zero emoji characters are present
+- Use text alternatives even if they seem less visually appealing
+- Code reviews must flag any emoji usage
+- Existing code with emojis should be cleaned up when encountered
+
+## Rationale
+
+1. **Professional appearance**: Maintains clean, professional codebase
+2. **Cross-platform compatibility**: Avoids encoding issues across different systems
+3. **Accessibility**: Ensures compatibility with screen readers and text-only environments
+4. **Consistency**: Maintains uniform coding style across the project
+5. **Debugging**: Prevents potential issues with character encoding in logs and error messages
+6. **Rule compliance**: Ensures consistent adherence to project standards
+
+This priority rule ensures a clean, professional, and accessible codebase while preventing rule processing gaps and visual appeal override issues.

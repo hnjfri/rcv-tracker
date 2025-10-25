@@ -1,0 +1,11 @@
+# Core dependencies for RCV Votes application
+requests>=2.31.0,<3.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# Optional dependencies for development and testing
+# Uncomment if needed for development:
+# pytest>=7.0.0,<8.0.0
+# pytest-cov>=4.0.0,<5.0.0
+# mypy>=1.0.0,<2.0.0
+# black>=23.0.0,<24.0.0
+# flake8>=6.0.0,<7.0.0

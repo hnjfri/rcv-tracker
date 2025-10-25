@@ -1,0 +1,228 @@
+---
+alwaysApply: true
+priority: critical
+context: ["testing", "quality", "reliability"]
+appliesTo: ["tests/**/*.py", "**/*test*.py"]
+---
+
+# Behavior-Driven Testing Standards
+
+All tests must follow behavior-driven development principles and be placed in the `tests/` directory.
+
+## MANDATORY CHECKPOINT: Before writing ANY test
+
+### Test Quality Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "Does this test follow behavior-driven principles and add real value?"
+
+**Required Analysis - Check ALL 10 criteria:**
+1. **Behavior-driven**: Does it test WHAT the system does, not HOW it does it?
+2. **Integration focus**: Does it test components working together, not just isolated units?
+3. **Public contracts**: Does it test the public API/interface, not internal implementation?
+4. **Meaningful assertions**: Does it verify actual business value, not trivial properties?
+5. **Real-world scenarios**: Does it reflect actual user workflows and use cases?
+6. **Realistic errors**: Does it test genuine failure modes, not contrived exceptions?
+7. **Non-redundant**: Does it test something not already covered by other tests?
+8. **Boundary testing**: Does it explore edge cases and input boundaries?
+9. **Business logic**: Does it test domain logic, not framework artifacts?
+10. **User value**: Does it verify the system solves real user problems?
+
+**Required Response:**
+- If ANY criterion fails → **REDESIGN THE TEST** to meet behavior-driven standards
+- If ALL criteria pass → **PROCEED with test implementation**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory test quality assessment"
+- "This test meets all 10 behavior-driven criteria: [Yes/No]"
+- "Based on this assessment, I am [proceeding/redesigning the test]"
+
+# Test Passage Requirements
+
+All tests must pass without exception. This is a non-negotiable requirement for code quality and system reliability.
+
+## MANDATORY CHECKPOINT: Before committing or deploying any code
+
+### Test Quality Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "Are all tests passing and is the system in a deployable state?"
+
+**Required Analysis - Check ALL 4 areas:**
+1. **Test execution** - Do all tests pass without failures or errors?
+2. **Test completeness** - Are there tests for all critical functionality?
+3. **Test stability** - Do tests pass consistently across multiple runs?
+4. **Test relevance** - Are failing tests actually testing important functionality?
+
+**Required Response:**
+- If ANY tests are failing → **FIX ALL FAILING TESTS BEFORE PROCEEDING**
+- If tests are flaky or inconsistent → **STABILIZE TESTS BEFORE PROCEEDING**
+- If all tests pass consistently → **PROCEED with confidence**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory test quality assessment"
+- "Test status: [all passing/some failing/unstable]"
+- "Based on this assessment, I am [fixing failures/stabilizing tests/proceeding]"
+
+## Core Test Quality Requirements
+
+### A. Zero Tolerance for Failing Tests
+**DO:**
+- Fix all failing tests immediately when encountered
+- Investigate root causes of test failures, not just symptoms
+- Ensure tests fail for the right reasons (actual bugs, not test issues)
+- Run full test suite before any major changes
+
+**DON'T:**
+- Ignore failing tests or mark them as "expected to fail"
+- Skip tests that are "temporarily broken"
+- Commit code when any tests are failing
+- Assume test failures are "just test problems"
+
+**Example Process:**
+```bash
+# Always run tests before committing
+python -m pytest tests/ -v
+
+# If any tests fail, investigate and fix
+# Only proceed when this shows: "All tests passed"
+```
+
+### B. Test Execution Standards
+**DO:**
+- Run complete test suite for any significant changes
+- Verify tests pass in clean environment (not just locally)
+- Check that new code doesn't break existing tests
+- Ensure tests are deterministic and repeatable
+
+**DON'T:**
+- Run only subset of tests for major changes
+- Ignore test failures in "unrelated" areas
+- Skip testing edge cases and error conditions
+- Allow tests that pass sometimes but fail other times
+
+### C. Test Failure Response Protocol
+**When tests fail, follow this protocol:**
+
+1. **Immediate Assessment**
+   - Is this a real bug in the application code?
+   - Is this a problem with the test itself?
+   - Is this an environment or dependency issue?
+
+2. **Root Cause Analysis**
+   - Trace the failure to its source
+   - Understand why the test is failing now when it passed before
+   - Identify if this affects production functionality
+
+3. **Fix Strategy**
+   - Fix application bugs that cause test failures
+   - Update tests if requirements have legitimately changed
+   - Improve test stability if tests are flaky
+   - Never just disable or skip failing tests
+
+4. **Verification**
+   - Run the specific failing test multiple times to ensure fix
+   - Run full test suite to ensure no regressions
+   - Verify fix doesn't break other functionality
+
+### D. Test Stability Requirements
+**DO:**
+- Write tests that pass consistently across different environments
+- Use proper setup/teardown to ensure test isolation
+- Mock external dependencies that could cause flaky behavior
+- Use deterministic test data and avoid randomness
+
+**DON'T:**
+- Write tests that depend on external services being available
+- Create tests that interfere with each other
+- Use time-dependent assertions that could be flaky
+- Ignore intermittent test failures
+
+### E. Critical Test Categories
+**These test categories must ALWAYS pass:**
+
+1. **Core Functionality Tests**
+   - CLI argument parsing and validation
+   - Database operations (create, read, update, delete)
+   - Document processing and embedding generation
+   - Query processing and response generation
+
+2. **Integration Tests**
+   - End-to-end CLI workflows
+   - Database and embedding system integration
+   - API client functionality
+   - File processing pipelines
+
+3. **Error Handling Tests**
+   - Invalid input handling
+   - Network failure scenarios
+   - Database connection errors
+   - Resource cleanup on failures
+
+4. **Regression Tests**
+   - Previously fixed bugs stay fixed
+   - Performance doesn't degrade
+   - Backward compatibility maintained
+   - Configuration changes work correctly
+
+## Test Failure Escalation
+
+### Immediate Action Required
+- **Any test failure** stops development until resolved
+- **Multiple test failures** indicate systematic problems requiring investigation
+- **Flaky tests** must be fixed or rewritten, not ignored
+- **Performance test failures** require optimization before proceeding
+
+### Acceptable Temporary States
+- **NONE** - All tests must pass at all times during active development
+
+### Unacceptable States
+- Committing code with failing tests
+- Deploying code with known test failures
+- Disabling tests instead of fixing underlying issues
+- Ignoring test failures in "non-critical" areas
+
+## Test Quality Metrics
+
+### Success Criteria
+- **100% pass rate** for all tests in the test suite
+- **Consistent results** across multiple test runs
+- **Fast feedback** - tests complete in reasonable time
+- **Clear failure messages** when tests do fail
+
+### Warning Signs
+- Tests that fail intermittently
+- Tests that require specific order to pass
+- Tests that fail in CI but pass locally
+- Tests that take excessively long to run
+
+### Red Flags
+- Any failing tests in main branch
+- Tests disabled or skipped without clear timeline for fixing
+- Test failures ignored during code reviews
+- Decreasing test pass rates over time
+
+## Benefits of Zero-Failure Testing
+
+1. **Confidence in Changes** - Know that modifications don't break existing functionality
+2. **Faster Development** - Catch issues early rather than in production
+3. **Better Code Quality** - Tests force consideration of edge cases and error conditions
+4. **Easier Debugging** - Test failures provide immediate feedback on what broke
+5. **Professional Standards** - Demonstrates commitment to quality and reliability
+
+## Implementation Strategy
+
+### For New Code
+- Write tests before or alongside new functionality
+- Ensure all new tests pass before committing
+- Run full test suite to verify no regressions
+
+### For Existing Code
+- Fix any currently failing tests as highest priority
+- Add tests for any untested critical functionality
+- Improve flaky tests to be more reliable
+
+### For Maintenance
+- Run tests before making any changes
+- Keep tests updated as requirements evolve
+- Remove obsolete tests that no longer serve a purpose
+
+This rule ensures that the codebase maintains high quality and reliability through rigorous testing standards that must never be compromised.

@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""
+Roll Call Vote (RCV) Tracker CLI
+
+Usage: ./rcv <last_name> <state> <congress_number> [congress_number ...]
+
+Example: ./rcv Thompson CA 116 117 118 119
+"""
+
+import sys
+import os
+import time
+from pathlib import Path
+
+# Add the rcv_votes package to the Python path
+sys.path.insert(0, str(Path(__file__).parent))
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
+from rcv_votes.container import ApplicationContainer
+from rcv_votes.models import MemberSearchCriteria
+from rcv_votes.exceptions import RCVError, ConfigurationError, ValidationError
+from rcv_votes.logging_config import log_operation_start, log_operation_success, log_operation_error
+
+
+def print_usage():
+    """Print usage information."""
+    print("Usage: ./rcv <last_name> <state> <congress_number> [congress_number ...]")
+    print("")
+    print("Arguments:")
+    print("  last_name        Last name of the congress member")
+    print("  state            Two-letter state abbreviation (e.g., CA, NY, TX)")
+    print("  congress_number  Congress number(s) to search (e.g., 116 117 118 119)")
+    print("")
+    print("Example:")
+    print("  ./rcv Thompson CA 116 117 118 119")
+    print("")
+    print("Environment:")
+    print("  CONGRESS_API_KEY  Required. Get from https://api.congress.gov/sign-up/")
+    print("  JSON_LOGS         Optional. Set to 'true' for JSON log format")
+
+
+def parse_arguments(args: list) -> MemberSearchCriteria:
+    """
+    Parse command line arguments.
+    
+    Args:
+        args: Command line arguments (excluding script name)
+        
+    Returns:
+        Parsed search criteria
+        
+    Raises:
+        ValidationError: If arguments are invalid
+    """
+    if len(args) < 3:
+        raise ValidationError(
+            "Insufficient arguments. Need at least: <last_name> <state> <congress_number>"
+        )
+    
+    last_name = args[0]
+    state = args[1]
+    
+    # Parse congress numbers
+    congress_numbers = []
+    for arg in args[2:]:
+        try:
+            congress_num = int(arg)
+            if congress_num < 1:
+                raise ValidationError(f"Congress number must be positive: {congress_num}")
+            congress_numbers.append(congress_num)
+        except ValueError:
+            raise ValidationError(f"Invalid congress number (must be integer): {arg}")
+    
+    return MemberSearchCriteria(
+        last_name=last_name,
+        state=state,
+        congress_numbers=congress_numbers
+    )
+
+
+def main():
+    """Main CLI entry point."""
+    # Check for help flags
+    if len(sys.argv) < 2 or sys.argv[1] in ['-h', '--help', 'help']:
+        print_usage()
+        sys.exit(0)
+    
+    # Parse command line arguments
+    try:
+        search_criteria = parse_arguments(sys.argv[1:])
+    except ValidationError as e:
+        print(f"[ERROR] {e}")
+        print("")
+        print_usage()
+        sys.exit(1)
+    
+    # Check for JSON logs environment variable
+    json_logs = os.getenv('JSON_LOGS', '').lower() == 'true'
+    verbose = os.getenv('VERBOSE', '').lower() == 'true'
+    
+    # Initialize application container
+    try:
+        with ApplicationContainer(verbose=verbose, json_logs=json_logs) as container:
+            # Validate configuration before proceeding
+            container.validate_configuration()
+            
+            logger = container.logger
+            correlation_id = container.correlation_id
+            
+            # Log operation start
+            operation = f"rcv_collection_{search_criteria.last_name}_{search_criteria.state}"
+            log_operation_start(logger, operation, correlation_id,
+                              member=search_criteria.last_name,
+                              state=search_criteria.state,
+                              congresses=search_criteria.congress_numbers)
+            
+            # Print user-friendly start message
+            congress_list = ', '.join(map(str, search_criteria.congress_numbers))
+            print(f"Collecting roll call votes for {search_criteria.last_name} ({search_criteria.state})")
+            print(f"Congress sessions: {congress_list}")
+            print("")
+            
+            start_time = time.time()
+            
+            try:
+                # Collect votes for the member (limit to 10 for testing)
+                vote_records = container.vote_collector.collect_member_votes(
+                    search_criteria, correlation_id, max_votes=10
+                )
+                
+                if not vote_records:
+                    print(f"[WARNING] No votes found for {search_criteria.last_name} ({search_criteria.state})")
+                    print("This could mean:")
+                    print("- The member name or state is incorrect")
+                    print("- The member did not serve in the specified congress sessions")
+                    print("- There were no recorded votes for this member")
+                    sys.exit(0)
+                
+                # Export to CSV
+                csv_file_path = container.csv_exporter.export_votes(
+                    vote_records, search_criteria.last_name
+                )
+                
+                # Success message
+                duration = time.time() - start_time
+                print(f"[SUCCESS] Collected {len(vote_records)} votes in {duration:.1f} seconds")
+                print(f"Results saved to: {csv_file_path}")
+                
+                # Log successful completion
+                log_operation_success(logger, operation, correlation_id, duration,
+                                    total_votes=len(vote_records),
+                                    output_file=csv_file_path)
+                
+            except RCVError as e:
+                duration = time.time() - start_time
+                print(f"[ERROR] {e}")
+                
+                # Log the error
+                log_operation_error(logger, operation, correlation_id, e,
+                                  duration=duration)
+                sys.exit(1)
+            
+            except Exception as e:
+                duration = time.time() - start_time
+                print(f"[ERROR] Unexpected error: {e}")
+                
+                # Log the unexpected error
+                log_operation_error(logger, operation, correlation_id, e,
+                                  duration=duration,
+                                  error_type="unexpected")
+                sys.exit(1)
+    
+    except ConfigurationError as e:
+        print(f"[ERROR] Configuration error: {e}")
+        sys.exit(1)
+    
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize application: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,69 @@
+---
+alwaysApply: true
+priority: medium
+---
+
+# Git Commit and Push Guidance
+
+Significant changes to the codebase should be committed and pushed to git to maintain version control and collaboration.
+
+## When to Commit and Push
+
+### Significant Changes Requiring Commits:
+- **New features**: Adding functionality or capabilities
+- **Database schema changes**: New tables, views, or structural modifications
+- **Performance improvements**: Optimizations that enhance system performance
+- **Bug fixes**: Resolving issues or errors
+- **Documentation updates**: Major changes to README or documentation
+- **Configuration changes**: Updates to project settings or dependencies
+- **View modifications**: Changes to Tableau views or calculated fields
+- **Helper table additions**: New supporting data structures
+
+### Minor Changes (Optional):
+- **Code formatting**: Whitespace or style changes
+- **Comment updates**: Documentation within code
+- **Temporary test files**: Files created for debugging (should be deleted)
+
+## Commit Best Practices
+
+### Commit Message Guidelines:
+- **Clear and descriptive**: Explain what changed and why
+- **Present tense**: "Add party vote count fields" not "Added party vote count fields"
+- **Concise**: Keep under 50 characters for the subject line
+- **Specific**: Avoid generic messages like "Update code"
+
+### Examples:
+- ✅ `Add party vote count fields to comprehensive view`
+- ✅ `Create helper table for True Abstentions calculation`
+- ✅ `Update README with latest feature documentation`
+- ❌ `Update stuff`
+- ❌ `Fixed things`
+
+## Push Frequency
+
+### Immediate Push Recommended:
+- After completing a logical feature or fix
+- Before switching to a different task
+- When changes are ready for review or deployment
+- After resolving merge conflicts
+
+### Batch Commits (Acceptable):
+- Multiple related small changes
+- Documentation updates across multiple files
+- Cleanup tasks that are part of the same effort
+
+## Branch Management
+
+- **Feature branches**: Use for major new features
+- **Main branch**: Keep stable and up-to-date
+- **Regular pushes**: Don't let local changes accumulate for too long
+
+## Benefits of Regular Commits
+
+1. **Version control**: Track changes and rollback if needed
+2. **Collaboration**: Keep team members informed of changes
+3. **Backup**: Protect against data loss
+4. **Code review**: Enable peer review of changes
+5. **Deployment**: Maintain deployable codebase
+
+This rule encourages good version control practices and helps maintain a clean, trackable development history.

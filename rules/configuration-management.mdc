@@ -1,0 +1,275 @@
+---
+alwaysApply: true
+priority: high
+context: ["configuration", "settings", "environment"]
+---
+
+# Configuration Management Standards
+
+All configuration must be centralized, validated, and environment-aware to ensure consistent behavior across different deployment scenarios.
+
+## MANDATORY CHECKPOINT: Before adding or modifying configuration
+
+### Configuration Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "Is this configuration properly managed and validated?"
+
+**Required Analysis - Check ALL 5 areas:**
+1. **Centralization** - Is this config value in the right place, not scattered?
+2. **Validation** - Are config values validated at startup with clear error messages?
+3. **Environment awareness** - Does this work across dev/test/prod environments?
+4. **Documentation** - Are all config options clearly documented with examples?
+5. **Security** - Are sensitive values properly protected and not hardcoded?
+
+**Required Response:**
+- If ANY area fails standards → **REFACTOR CONFIGURATION APPROACH**
+- If minor improvements needed → **IMPLEMENT WITH IMPROVEMENTS**
+- If all areas meet standards → **PROCEED with implementation**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory configuration assessment"
+- "Configuration meets [all/most/few] standards"
+- "Based on this assessment, I am [refactoring/improving/proceeding]"
+
+## Core Configuration Requirements
+
+### A. Centralized Configuration Structure
+**DO:**
+- Create dedicated configuration modules/files
+- Group related settings logically
+- Use hierarchical configuration structure
+- Provide single source of truth for each setting
+
+**DON'T:**
+- Scatter configuration across multiple modules
+- Hardcode values in business logic
+- Duplicate configuration values
+- Mix configuration with implementation
+
+**Example Structure:**
+```python
+# claude_word_qa/config.py
+from dataclasses import dataclass
+from typing import Optional
+import os
+
+@dataclass
+class DatabaseConfig:
+    default_path: str = "databases/default.db"
+    connection_timeout: int = 30
+    max_connections: int = 10
+
+@dataclass
+class EmbeddingConfig:
+    model_name: str = "all-MiniLM-L6-v2"
+    max_input_length: int = 512
+    batch_size: int = 32
+    cache_embeddings: bool = True
+
+@dataclass
+class RAGConfig:
+    chunk_max_chars: int = 1400
+    chunk_overlap: int = 200
+    max_results: int = 10
+    similarity_threshold: float = 0.7
+
+@dataclass
+class APIConfig:
+    anthropic_model: str = "claude-3-5-sonnet-20241022"
+    max_tokens: int = 4000
+    temperature: float = 0.0
+    timeout: int = 60
+
+@dataclass
+class AppConfig:
+    database: DatabaseConfig = DatabaseConfig()
+    embedding: EmbeddingConfig = EmbeddingConfig()
+    rag: RAGConfig = RAGConfig()
+    api: APIConfig = APIConfig()
+    
+    def __post_init__(self):
+        self.validate()
+    
+    def validate(self):
+        """Validate all configuration values."""
+        # Validation logic here
+        pass
+```
+
+### B. Environment-Specific Configuration
+**DO:**
+- Support dev/test/prod environment configurations
+- Use environment variables for deployment-specific values
+- Provide sensible defaults for development
+- Document environment variable requirements
+
+**DON'T:**
+- Hardcode environment-specific values
+- Ignore environment differences
+- Use production values in development
+- Skip environment variable documentation
+
+**Example:**
+```python
+# Environment-aware configuration
+class EnvironmentConfig:
+    def __init__(self):
+        self.environment = os.getenv('CLAUDE_QA_ENV', 'development')
+        self.debug = self.environment == 'development'
+        
+        # Environment-specific database paths
+        if self.environment == 'production':
+            self.database_path = os.getenv('DATABASE_PATH', '/opt/claude-qa/data/production.db')
+        elif self.environment == 'test':
+            self.database_path = ':memory:'  # In-memory for tests
+        else:
+            self.database_path = 'databases/development.db'
+```
+
+### C. Configuration Validation
+**DO:**
+- Validate all configuration at application startup
+- Provide clear error messages for invalid values
+- Check required environment variables
+- Validate file paths and permissions
+
+**DON'T:**
+- Skip configuration validation
+- Provide cryptic error messages
+- Fail silently on invalid configuration
+- Wait until runtime to detect config errors
+
+**Example:**
+```python
+class ConfigValidator:
+    def validate_database_config(self, config: DatabaseConfig):
+        if config.connection_timeout <= 0:
+            raise ConfigurationError("Database connection timeout must be positive")
+        
+        # Ensure database directory exists
+        db_dir = os.path.dirname(config.default_path)
+        if db_dir and not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except PermissionError:
+                raise ConfigurationError(f"Cannot create database directory: {db_dir}")
+    
+    def validate_api_config(self, config: APIConfig):
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+        if not api_key:
+            raise ConfigurationError(
+                "ANTHROPIC_API_KEY environment variable is required. "
+                "Get your API key from https://console.anthropic.com/"
+            )
+        
+        if not api_key.startswith('sk-ant-'):
+            raise ConfigurationError("Invalid Anthropic API key format")
+```
+
+### D. Configuration Documentation
+**DO:**
+- Document all configuration options with descriptions
+- Provide example values and valid ranges
+- Explain the impact of each setting
+- Include environment variable mappings
+
+**DON'T:**
+- Leave configuration options undocumented
+- Use unclear or technical-only descriptions
+- Skip examples and valid ranges
+- Forget to update docs when config changes
+
+**Example:**
+```python
+# Well-documented configuration
+@dataclass
+class RAGConfig:
+    """Configuration for Retrieval-Augmented Generation system."""
+    
+    chunk_max_chars: int = 1400
+    """Maximum characters per document chunk. 
+    
+    Larger chunks provide more context but may exceed model limits.
+    Valid range: 100-2000. Default: 1400.
+    Environment variable: CLAUDE_QA_CHUNK_SIZE
+    """
+    
+    chunk_overlap: int = 200
+    """Character overlap between adjacent chunks.
+    
+    Overlap ensures important information isn't lost at chunk boundaries.
+    Should be 10-30% of chunk_max_chars. Default: 200.
+    Environment variable: CLAUDE_QA_CHUNK_OVERLAP
+    """
+```
+
+### E. Configuration Loading and Initialization
+**DO:**
+- Load configuration once at application startup
+- Provide configuration reload mechanisms for long-running services
+- Use dependency injection for configuration access
+- Handle configuration loading errors gracefully
+
+**DON'T:**
+- Load configuration multiple times
+- Access configuration directly throughout the codebase
+- Ignore configuration loading failures
+- Mix configuration loading with business logic
+
+**Example:**
+```python
+class ConfigManager:
+    _instance: Optional['ConfigManager'] = None
+    _config: Optional[AppConfig] = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def load_config(self) -> AppConfig:
+        """Load and validate configuration."""
+        if self._config is None:
+            try:
+                self._config = AppConfig()
+                self._config.validate()
+                logger.info("Configuration loaded successfully")
+            except Exception as e:
+                logger.error(f"Configuration loading failed: {e}")
+                raise
+        return self._config
+    
+    def get_config(self) -> AppConfig:
+        """Get current configuration, loading if necessary."""
+        if self._config is None:
+            return self.load_config()
+        return self._config
+```
+
+## Configuration Best Practices
+
+### File Organization
+- Keep configuration files in dedicated directories
+- Use clear naming conventions (config.py, settings.yaml)
+- Separate configuration from secrets
+- Version control configuration files (not secrets)
+
+### Type Safety
+- Use type hints for all configuration values
+- Leverage dataclasses or Pydantic for validation
+- Provide type conversion utilities
+- Validate types at runtime
+
+### Testing Configuration
+- Provide test-specific configuration
+- Use dependency injection for testability
+- Mock configuration in unit tests
+- Test configuration validation logic
+
+### Migration and Versioning
+- Version configuration schema changes
+- Provide migration utilities for config updates
+- Maintain backward compatibility when possible
+- Document breaking configuration changes
+
+This rule ensures consistent, maintainable, and secure configuration management across the entire application.

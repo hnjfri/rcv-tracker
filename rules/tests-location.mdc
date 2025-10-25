@@ -1,0 +1,168 @@
+---
+alwaysApply: true
+priority: critical
+appliesTo: ["tests/**/*.py", "**/*test*.py"]
+---
+
+## Test Organization Requirements
+
+### File Location
+1. All test files must be placed in the `tests/` directory
+2. Test files should follow the naming convention: `test_*.py`
+3. When creating test scripts, always use the `tests/` directory as the target location
+4. Test files should be cleaned up after use (deleted when no longer needed)
+5. The `tests/` directory should be the default location for any temporary testing scripts
+
+### Examples
+- ✅ `tests/test_user_workflow.py`
+- ✅ `tests/test_document_processing_integration.py`
+- ❌ `test_party_fields.py` (in root directory)
+- ❌ `temp/test_helper_table.py`
+
+## Behavior-Driven Testing Principles
+
+### A. Behavior-Driven Rather Than Coverage-Driven
+**DO:**
+- Test complete user workflows and business scenarios
+- Focus on what the system accomplishes for users
+- Write tests that describe system behavior in business terms
+
+**DON'T:**
+- Write tests solely to increase coverage percentages
+- Test internal implementation details
+- Create trivial tests that don't verify meaningful behavior
+
+### B. Integration Testing Focus
+**DO:**
+- Test components working together in realistic scenarios
+- Verify data flows between system boundaries
+- Test complete request/response cycles
+
+**DON'T:**
+- Over-rely on mocked unit tests that don't verify real integration
+- Test components in complete isolation from their dependencies
+- Mock every external dependency without integration verification
+
+### C. Test Public Contracts
+**DO:**
+- Test the public API and interfaces that clients depend on
+- Verify method contracts and invariants
+- Focus on the behavior clients can observe
+
+**DON'T:**
+- Test private methods directly
+- Verify internal state that clients can't access
+- Test implementation details that could change without breaking clients
+
+### D. Avoid Trivial Assertions
+**DO:**
+- Verify complex business logic and calculations
+- Assert on meaningful state changes and outcomes
+- Test error conditions and edge cases thoroughly
+
+**DON'T:**
+- Assert that objects are "not None" without verifying their content
+- Test trivial getters/setters without business logic
+- Verify type checking that Python already handles
+
+### E. Real-World Scenario Testing
+**DO:**
+- Use realistic data sizes and formats
+- Test actual user workflows from end to end
+- Include performance testing with realistic loads
+
+**DON'T:**
+- Use only tiny test datasets
+- Test with perfect, unrealistic input data
+- Ignore performance characteristics
+
+### F. Avoid Artificial Error Scenarios
+**DO:**
+- Test genuine failure modes (network timeouts, file corruption, etc.)
+- Verify graceful degradation under realistic stress
+- Test recovery from actual error conditions
+
+**DON'T:**
+- Create contrived exceptions that don't occur in practice
+- Mock failures that don't represent real system behavior
+- Test error handling without realistic error conditions
+
+### G. Avoid Redundant Coverage
+**DO:**
+- Identify gaps in test coverage and fill them strategically
+- Consolidate similar tests that verify the same behavior
+- Focus on unique scenarios and edge cases
+
+**DON'T:**
+- Write multiple tests that verify identical behavior
+- Duplicate integration tests at different levels unnecessarily
+- Test the same logic through multiple similar paths
+
+### H. Property-Based and Boundary Testing
+**DO:**
+- Test with generated data to explore edge cases
+- Verify system behavior at input boundaries (empty, maximum, minimum)
+- Use property-based testing for mathematical operations
+
+**DON'T:**
+- Rely only on fixed test cases
+- Ignore boundary conditions and edge cases
+- Skip testing with varied input sizes and types
+
+### I. Test Business Logic, Not Framework Artifacts
+**DO:**
+- Focus on domain logic and business rules
+- Test calculation accuracy and business process flows
+- Verify compliance with business requirements
+
+**DON'T:**
+- Test framework functionality (e.g., that mocks work correctly)
+- Verify that abstract base classes raise TypeError
+- Test language features rather than application logic
+
+### J. User-Centric Value Verification
+**DO:**
+- Verify that features solve actual user problems
+- Test that outputs are accurate and useful for users
+- Ensure error messages help users resolve issues
+
+**DON'T:**
+- Test technical implementation without user value
+- Verify system behavior that doesn't impact users
+- Focus on code structure rather than user outcomes
+
+## Test Quality Examples
+
+### ✅ Behavior-Driven Test
+```python
+def test_document_processing_workflow():
+    """Test complete document processing from upload to searchable content."""
+    # Real document, realistic size
+    doc_path = "tests/fixtures/sample_news_article.docx"
+    
+    # Process document through complete pipeline
+    processor = DocumentProcessor()
+    result = processor.process_document(doc_path)
+    
+    # Verify business value: document is searchable
+    assert result.is_searchable()
+    assert len(result.extracted_articles) > 0
+    assert result.extracted_articles[0].title is not None
+    assert result.extracted_articles[0].content_length > 100
+    
+    # Verify user can find content
+    search_result = result.search("key topic from article")
+    assert len(search_result) > 0
+```
+
+### ❌ Coverage-Driven Test
+```python
+def test_document_processor_init():
+    """Test DocumentProcessor initialization."""
+    processor = DocumentProcessor()
+    assert processor is not None
+    assert processor.config is not None
+    assert hasattr(processor, 'process_document')
+```
+
+This rule ensures tests provide real value by verifying actual system behavior and user outcomes rather than just achieving coverage metrics.

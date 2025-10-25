@@ -1,0 +1,87 @@
+---
+alwaysApply: true
+priority: critical
+---
+
+# Incremental Collaboration Rule
+
+## Purpose
+Prevent reversing or undoing established work during collaborative coding sessions.
+
+## MANDATORY CHECKPOINT: Before making ANY changes to code or documentation
+
+### Phase 1: Self-Assessment (REQUIRED)
+**STOP and ask yourself:** "In what 3 ways might I be reversing prior work by making the change I intend to make?"
+
+**Required Response:**
+- If you CAN identify 3 potential ways you might reverse prior work → **DO NOT MAKE THE CHANGE**
+- If you CAN identify 1-2 potential ways → **ASK THE USER FOR CLARIFICATION**  
+- If you CANNOT identify any ways (answer: "There are no ways") → **PROCEED with change**
+
+### Phase 2: Standard Process (REQUIRED)
+1. **Review the conversation history** - Read through previous decisions, fixes, and user feedback in this session
+2. **Identify established work** - Note what has already been built, refactored, or decided upon
+3. **Build incrementally** - Each change must ADD to or REFINE existing work, never REPLACE or UNDO it
+4. **Preserve user preferences** - Maintain tone, scope, and architectural decisions already established
+5. **When uncertain** - Ask clarifying questions rather than making assumptions that could reverse prior work
+
+## Key Principle
+Treat every request as part of an ongoing collaboration, not an isolated task. The goal is to evolve the project forward, never backward.
+
+## Self-Assessment Examples
+
+### Example 1: Changing Code Architecture
+**Question:** "In what 3 ways might I be reversing prior work by refactoring this CLI from procedural to OOP?"
+**Analysis:**
+1. Could I be undoing established procedural patterns the user preferred?
+2. Could I be removing working functionality that was carefully implemented?
+3. Could I be changing the user experience in ways the user didn't request?
+**Decision:** If any are "yes" → Ask user. If all are "no" → Proceed.
+
+### Example 2: Updating Documentation  
+**Question:** "In what 3 ways might I be reversing prior work by rewriting this README section?"
+**Analysis:**
+1. Could I be removing specific examples the user requested?
+2. Could I be changing the tone/style the user established?
+3. Could I be undoing corrections the user made earlier?
+**Decision:** If any are "yes" → Ask user. If all are "no" → Proceed.
+
+## Red Flags (Potential Rule Violations)
+- Removing content that was previously added based on user feedback
+- Changing architectural patterns we've already established  
+- Reverting to generic examples when specific context was requested
+- Undoing refactoring work that was completed earlier in the session
+- Making changes that ignore previous user corrections or preferences
+- **CRITICAL:** Proceeding without completing the mandatory self-assessment
+
+## Exception
+Only reverse prior work when the user explicitly requests it or identifies it as incorrect.
+
+## Application
+This rule applies to:
+- All code changes
+- Documentation updates
+- Architectural decisions
+- Content modifications
+- Any collaborative project work
+
+## Enforcement Mechanism
+
+### Mandatory Self-Questioning Protocol
+Before ANY change, the LLM agent MUST internally ask and answer:
+
+**"In what 3 ways might I be reversing prior work by making the change I intend to make?"**
+
+**Response Logic:**
+- **3+ potential reversals identified** → STOP. Do not make the change.
+- **1-2 potential reversals identified** → ASK USER for clarification before proceeding.
+- **0 potential reversals (answer: "There are no ways")** → PROCEED with change.
+
+### Verification Checkpoint
+After the self-assessment, the agent must be able to state:
+- "I have completed the mandatory self-assessment"
+- "I identified [0/1/2/3+] potential ways this change might reverse prior work"
+- "Based on this assessment, I am [proceeding/asking for clarification/stopping]"
+
+## Goal
+Ensure continuous forward progress on collaborative projects by building on established work rather than replacing it, with mandatory safeguards to prevent accidental reversals.

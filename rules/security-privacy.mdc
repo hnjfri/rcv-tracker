@@ -1,0 +1,240 @@
+---
+alwaysApply: true
+priority: critical
+context: ["security", "privacy", "data-protection"]
+---
+
+# Security and Data Privacy Standards
+
+All code must protect sensitive information and prevent security vulnerabilities, especially when processing documents and using external APIs.
+
+## MANDATORY CHECKPOINT: Before handling sensitive data or external services
+
+### Security Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "What security risks does this code introduce?"
+
+**Required Analysis - Check ALL 7 areas:**
+1. **Data exposure** - Could sensitive document content be logged or exposed?
+2. **API security** - Are API keys and credentials properly protected?
+3. **Input validation** - Are user inputs validated and sanitized?
+4. **SQL injection** - Are database queries parameterized and safe?
+5. **File system access** - Are file paths validated and restricted?
+6. **Rate limiting** - Are external API calls properly throttled?
+7. **Error disclosure** - Do error messages reveal sensitive information?
+
+**Required Response:**
+- If ANY high-risk vulnerabilities identified → **FIX BEFORE PROCEEDING**
+- If medium-risk issues found → **IMPLEMENT MITIGATIONS**
+- If only low-risk or no issues → **PROCEED with security notes**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory security assessment"
+- "I identified [high/medium/low/no] security risks"
+- "Based on this assessment, I am [fixing vulnerabilities/implementing mitigations/proceeding]"
+
+## Core Security Requirements
+
+### A. Sensitive Data Protection
+**DO:**
+- Sanitize document content before logging
+- Use content hashing instead of storing full text in logs
+- Implement data retention policies
+- Encrypt sensitive data at rest when required
+
+**DON'T:**
+- Log full document content or user queries
+- Store sensitive information in plain text logs
+- Keep sensitive data longer than necessary
+- Expose document content in error messages
+
+**Example:**
+```python
+# Good: Sanitized logging
+def log_document_processed(title: str, content_length: int):
+    # Hash title for identification without exposure
+    title_hash = hashlib.sha256(title.encode()).hexdigest()[:8]
+    logger.info(f"Processed document {title_hash} ({content_length} chars)")
+
+# Bad: Exposing sensitive content
+logger.info(f"Processing: {full_document_content}")  # NEVER DO THIS
+```
+
+### B. API Key and Credential Management
+**DO:**
+- Store API keys in environment variables only
+- Use secure credential management systems
+- Rotate API keys regularly
+- Validate API key format before use
+
+**DON'T:**
+- Hardcode API keys in source code
+- Store credentials in configuration files
+- Log API keys or tokens
+- Use default or weak credentials
+
+**Example:**
+```python
+# Good: Environment variable usage
+import os
+from .exceptions import ConfigurationError
+
+def get_api_key() -> str:
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        raise ConfigurationError("ANTHROPIC_API_KEY environment variable required")
+    if not api_key.startswith('sk-ant-'):
+        raise ConfigurationError("Invalid API key format")
+    return api_key
+
+# Bad: Hardcoded credentials
+API_KEY = "sk-ant-1234567890abcdef"  # NEVER DO THIS
+```
+
+### C. Input Validation and Sanitization
+**DO:**
+- Validate all user inputs at system boundaries
+- Sanitize file paths to prevent directory traversal
+- Validate query parameters and arguments
+- Use allowlists for acceptable input patterns
+
+**DON'T:**
+- Trust user input without validation
+- Allow arbitrary file path access
+- Execute user input as code
+- Skip validation for "trusted" sources
+
+**Example:**
+```python
+# Good: Path validation
+import os
+from pathlib import Path
+
+def validate_file_path(file_path: str, allowed_dir: str) -> Path:
+    path = Path(file_path).resolve()
+    allowed = Path(allowed_dir).resolve()
+    
+    if not path.is_relative_to(allowed):
+        raise ValidationError(f"File path outside allowed directory: {allowed}")
+    
+    if not path.exists():
+        raise ValidationError(f"File does not exist: {path}")
+    
+    return path
+
+# Bad: No path validation
+def process_file(file_path: str):
+    with open(file_path, 'r') as f:  # Dangerous: could access any file
+        return f.read()
+```
+
+### D. SQL Injection Prevention
+**DO:**
+- Use parameterized queries exclusively
+- Validate input types and ranges
+- Use ORM query builders when possible
+- Escape special characters in dynamic queries
+
+**DON'T:**
+- Concatenate user input into SQL strings
+- Use string formatting for SQL queries
+- Trust input data in WHERE clauses
+- Execute dynamic SQL without validation
+
+**Example:**
+```python
+# Good: Parameterized queries
+def get_articles_by_source(source_name: str) -> List[Dict]:
+    cursor.execute(
+        "SELECT title, content FROM articles WHERE source = ?",
+        (source_name,)
+    )
+    return cursor.fetchall()
+
+# Bad: SQL injection vulnerable
+def get_articles_by_source(source_name: str) -> List[Dict]:
+    query = f"SELECT title, content FROM articles WHERE source = '{source_name}'"
+    cursor.execute(query)  # DANGEROUS: SQL injection risk
+```
+
+### E. Rate Limiting and API Protection
+**DO:**
+- Implement rate limiting for external API calls
+- Use exponential backoff for retries
+- Monitor API usage and costs
+- Set reasonable timeout values
+
+**DON'T:**
+- Make unlimited API requests
+- Ignore rate limit responses
+- Use infinite retry loops
+- Skip timeout configuration
+
+### F. Error Handling Security
+**DO:**
+- Log detailed errors internally only
+- Return generic error messages to users
+- Sanitize error messages of sensitive data
+- Use error codes instead of detailed descriptions
+
+**DON'T:**
+- Expose stack traces to end users
+- Include sensitive data in error messages
+- Log credentials in error contexts
+- Return detailed system information in errors
+
+**Example:**
+```python
+# Good: Secure error handling
+try:
+    result = process_sensitive_document(doc_path)
+except DatabaseError as e:
+    logger.error(f"Database error processing document: {e}")
+    raise UserFacingError("Unable to process document. Please try again.")
+
+# Bad: Information disclosure
+except DatabaseError as e:
+    raise Exception(f"Database connection failed: {db_connection_string} - {e}")
+```
+
+## Security Monitoring Requirements
+
+### Audit Logging
+- Failed authentication attempts
+- Unusual file access patterns
+- API rate limit violations
+- Configuration changes
+
+### Security Metrics
+- API key usage patterns
+- File access frequency
+- Error rates by type
+- Resource consumption anomalies
+
+### Incident Response
+- Automated alerts for security events
+- Log retention for forensic analysis
+- Secure backup and recovery procedures
+- Security incident documentation
+
+## Privacy Protection Requirements
+
+### Data Minimization
+- Collect only necessary document metadata
+- Process content without persistent storage when possible
+- Implement data retention policies
+- Provide data deletion capabilities
+
+### User Privacy
+- Anonymize usage analytics
+- Avoid tracking user behavior patterns
+- Respect user data sovereignty
+- Implement privacy-by-design principles
+
+### Compliance Considerations
+- Document data handling practices
+- Implement data subject rights (where applicable)
+- Maintain audit trails for data processing
+- Regular privacy impact assessments
+
+This rule ensures the system protects sensitive document content and maintains security best practices throughout the data processing pipeline.

@@ -1,0 +1,327 @@
+---
+appliesTo: ["claude_word_qa/**/*.py", "README.md", "**/*.md"]
+priority: medium
+context: ["documentation", "maintainability", "knowledge-sharing"]
+---
+
+# Documentation and Code Comments Standards
+
+All code must be thoroughly documented to ensure maintainability, knowledge transfer, and ease of onboarding for new contributors.
+
+## MANDATORY CHECKPOINT: Before completing any significant code changes
+
+### Documentation Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "Is this code properly documented for future maintainers?"
+
+**Required Analysis - Check ALL 6 areas:**
+1. **Public API documentation** - Are all public methods/classes documented with examples?
+2. **Architecture decisions** - Are complex design choices explained?
+3. **Usage examples** - Can someone use this code without reading the implementation?
+4. **Error scenarios** - Are failure modes and error handling documented?
+5. **Dependencies** - Are external dependencies and their purposes explained?
+6. **Business context** - Is the "why" behind the code clear?
+
+**Required Response:**
+- If critical documentation missing → **ADD DOCUMENTATION BEFORE PROCEEDING**
+- If documentation incomplete → **ENHANCE EXISTING DOCUMENTATION**
+- If documentation comprehensive → **PROCEED with implementation**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory documentation assessment"
+- "Documentation is [comprehensive/adequate/incomplete]"
+- "Based on this assessment, I am [adding documentation/enhancing/proceeding]"
+
+## Core Documentation Requirements
+
+### A. Docstring Standards for Public APIs
+**DO:**
+- Write comprehensive docstrings for all public methods and classes
+- Include parameter descriptions, return values, and raised exceptions
+- Provide usage examples for complex functionality
+- Use consistent docstring format (Google or NumPy style)
+
+**DON'T:**
+- Skip docstrings for "obvious" functionality
+- Write docstrings that just repeat the method name
+- Forget to update docstrings when code changes
+- Use inconsistent formatting across the codebase
+
+**Example:**
+```python
+# Good: Comprehensive docstring
+def process_rag_query(self, question: str, max_results: int = 10) -> Tuple[str, Dict[str, Any]]:
+    """Process a question using the RAG (Retrieval-Augmented Generation) system.
+    
+    This method retrieves relevant document chunks based on semantic similarity,
+    then generates a response using the configured LLM provider with the retrieved
+    context to provide accurate, source-attributed answers.
+    
+    Args:
+        question: The user's question to answer. Should be a clear, specific query
+            about the content in the document database.
+        max_results: Maximum number of document chunks to retrieve for context.
+            Higher values provide more context but may exceed token limits.
+            Defaults to 10.
+    
+    Returns:
+        A tuple containing:
+        - str: The generated answer with source attribution
+        - Dict[str, Any]: Technical details including:
+            - 'sources_used': List of document sources referenced
+            - 'similarity_scores': Relevance scores for retrieved chunks
+            - 'model_used': Name of the LLM model used for generation
+            - 'processing_time': Time taken to process the query
+    
+    Raises:
+        DatabaseError: If the document database cannot be accessed
+        APIError: If the LLM provider API call fails
+        ValidationError: If the question is empty or invalid
+    
+    Example:
+        >>> rag_system = RAGSystem("news_database.db")
+        >>> answer, details = rag_system.process_rag_query(
+        ...     "What policies has the mayor proposed for housing?"
+        ... )
+        >>> print(f"Answer: {answer}")
+        >>> print(f"Sources: {details['sources_used']}")
+    """
+```
+
+### B. Architecture Decision Records (ADRs)
+**DO:**
+- Document major architectural decisions with rationale
+- Explain trade-offs considered and why specific approaches were chosen
+- Include context about alternatives that were rejected
+- Update ADRs when decisions change
+
+**DON'T:**
+- Make major architectural changes without documentation
+- Skip explaining the reasoning behind complex designs
+- Leave future maintainers guessing about design intent
+- Document only the "what" without the "why"
+
+**Example:**
+```python
+"""
+Architecture Decision: RAG System Component Separation
+
+Decision: Split the monolithic RAGSystem class into separate components
+(DatabaseManager, ArticleRetriever, DocumentProcessor, etc.) using
+dependency injection and interface-based design.
+
+Context: The original RAGSystem class violated Single Responsibility
+Principle by handling database operations, document processing, embedding
+generation, and LLM interaction all in one class. This made testing
+difficult and coupling too tight.
+
+Alternatives Considered:
+1. Keep monolithic design - Rejected due to testing and maintainability issues
+2. Simple class splitting - Rejected due to continued tight coupling
+3. Interface-based separation with DI - Chosen for testability and flexibility
+
+Trade-offs:
+- Pro: Better testability, clearer separation of concerns, easier to extend
+- Pro: Can swap implementations (e.g., different embedding providers)
+- Con: More complexity, more files to manage
+- Con: Slight performance overhead from additional abstraction
+
+Implementation: Each component implements a clear interface, and the
+RAGSystemFactory handles dependency injection. This allows easy mocking
+in tests and future extensibility.
+"""
+```
+
+### C. Code Comments That Explain "Why"
+**DO:**
+- Explain complex business logic and non-obvious decisions
+- Document workarounds and their necessity
+- Clarify performance optimizations and their trade-offs
+- Explain edge cases and special handling
+
+**DON'T:**
+- Write comments that just repeat what the code does
+- Leave complex algorithms unexplained
+- Skip commenting on performance-critical sections
+- Write comments that become outdated
+
+**Example:**
+```python
+# Good: Comments explain "why" and business context
+def smart_chunk_article(self, content: str, max_chars: int = 1400) -> List[str]:
+    """Split article content into semantically coherent chunks."""
+    
+    # Use sentence boundaries to avoid breaking mid-sentence, which can
+    # confuse the embedding model and reduce retrieval accuracy
+    sentences = self._split_into_sentences(content)
+    
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        # Check if adding this sentence would exceed the limit
+        potential_chunk = current_chunk + " " + sentence if current_chunk else sentence
+        
+        if len(potential_chunk) <= max_chars:
+            current_chunk = potential_chunk
+        else:
+            # If current chunk is empty but sentence is too long, we must split it
+            # This handles edge cases like very long sentences that exceed max_chars
+            if not current_chunk:
+                # Split long sentence at word boundaries as last resort
+                current_chunk = sentence[:max_chars].rsplit(' ', 1)[0]
+                chunks.append(current_chunk)
+                # Continue with remainder of the sentence
+                remainder = sentence[len(current_chunk):].strip()
+                current_chunk = remainder if len(remainder) <= max_chars else ""
+            else:
+                # Save current chunk and start new one with this sentence
+                chunks.append(current_chunk)
+                current_chunk = sentence
+    
+    # Don't forget the last chunk
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    return chunks
+
+# Bad: Comments that don't add value
+def smart_chunk_article(self, content: str, max_chars: int = 1400) -> List[str]:
+    # Split content into sentences
+    sentences = self._split_into_sentences(content)
+    
+    # Initialize empty list
+    chunks = []
+    # Initialize empty string
+    current_chunk = ""
+    
+    # Loop through sentences
+    for sentence in sentences:
+        # Add sentence to chunk
+        potential_chunk = current_chunk + " " + sentence if current_chunk else sentence
+```
+
+### D. README and Module Documentation
+**DO:**
+- Provide clear installation and setup instructions
+- Include comprehensive usage examples
+- Document all CLI commands and options
+- Explain the project's purpose and scope
+
+**DON'T:**
+- Assume users know how to set up the environment
+- Skip documenting important configuration options
+- Leave examples outdated or broken
+- Use overly technical language without explanation
+
+**Example README Structure:**
+```markdown
+# Claude Word QA
+
+A specialized tool for querying news documents using Retrieval-Augmented Generation (RAG).
+
+## What It Does
+
+This tool processes .docx files downloaded from Nexis news databases, creates searchable embeddings, and answers questions about the content using Claude AI with proper source attribution.
+
+## Quick Start
+
+### Installation
+```bash
+pip install -e .
+export ANTHROPIC_API_KEY="your-api-key-here"
+```
+
+### Basic Usage
+```bash
+# Create a new database and add documents
+claude-qa news --init-db
+claude-qa news --add-docs /path/to/nexis/documents/
+
+# Query the documents
+claude-qa "What policies were announced this week?" news --rag-mode
+```
+
+### Advanced Usage
+[Detailed examples with explanations]
+
+## Configuration
+[All configuration options with examples]
+
+## Troubleshooting
+[Common issues and solutions]
+```
+
+### E. Error Documentation
+**DO:**
+- Document all custom exceptions and when they're raised
+- Provide troubleshooting guides for common errors
+- Include example error messages and their meanings
+- Explain recovery strategies for different error types
+
+**DON'T:**
+- Leave error conditions undocumented
+- Use cryptic error messages without explanation
+- Skip documenting error recovery procedures
+- Assume users will understand technical error details
+
+### F. Dependency Documentation
+**DO:**
+- Explain why each major dependency is needed
+- Document version requirements and compatibility
+- Provide alternatives when dependencies are optional
+- Include installation troubleshooting for complex dependencies
+
+**DON'T:**
+- Add dependencies without explaining their purpose
+- Skip documenting version constraints
+- Ignore platform-specific dependency issues
+- Leave optional dependencies undocumented
+
+**Example:**
+```python
+"""
+Dependencies and Their Purposes:
+
+Core Dependencies:
+- sentence-transformers: Generates semantic embeddings for document chunks.
+  Used for similarity search in RAG retrieval. Requires PyTorch.
+- anthropic: Official client for Claude API. Handles authentication and
+  request formatting for LLM interactions.
+- python-docx: Parses .docx files from Nexis exports. Handles complex
+  document structures and formatting.
+
+Optional Dependencies:
+- torch: Required by sentence-transformers. CPU version sufficient for
+  most use cases, GPU version provides faster embedding generation.
+- numpy: Used for embedding vector operations and similarity calculations.
+  Automatically installed with sentence-transformers.
+
+Development Dependencies:
+- pytest: Test framework with fixtures and parameterization support
+- pytest-cov: Coverage reporting integrated with pytest
+- black: Code formatting to maintain consistent style
+"""
+```
+
+## Documentation Maintenance
+
+### Keeping Documentation Current
+- Update docstrings when method signatures change
+- Review and update README when adding new features
+- Maintain architecture documentation during refactoring
+- Include documentation updates in code reviews
+
+### Documentation Testing
+- Test code examples in documentation
+- Verify installation instructions on clean environments
+- Check that all documented features actually work
+- Validate external links and references
+
+### Knowledge Transfer
+- Document tribal knowledge before team members leave
+- Create onboarding guides for new contributors
+- Maintain decision history for future reference
+- Document workarounds and their expiration conditions
+
+This rule ensures that code remains maintainable and accessible to both current and future developers working on the project.

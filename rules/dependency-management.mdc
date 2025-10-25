@@ -1,0 +1,341 @@
+---
+appliesTo: ["pyproject.toml", "requirements*.txt", "claude_word_qa/**/*.py"]
+priority: medium
+context: ["dependencies", "security", "maintenance"]
+---
+
+# Dependency Management Standards
+
+All dependencies must be carefully managed to ensure security, stability, and maintainability of the project.
+
+## MANDATORY CHECKPOINT: Before adding or modifying dependencies
+
+### Dependency Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "Is this dependency necessary and properly managed?"
+
+**Required Analysis - Check ALL 7 areas:**
+1. **Necessity** - Is this dependency truly required, or can functionality be implemented internally?
+2. **Security** - Is the dependency from a trusted source with good security practices?
+3. **Maintenance** - Is the dependency actively maintained with recent updates?
+4. **Compatibility** - Does this dependency work with existing dependencies and Python versions?
+5. **Size impact** - What is the installation size and performance impact?
+6. **Licensing** - Is the dependency's license compatible with the project?
+7. **Version pinning** - Should this dependency be pinned to specific versions?
+
+**Required Response:**
+- If ANY critical issues identified → **FIND ALTERNATIVE OR FIX ISSUES**
+- If minor concerns exist → **IMPLEMENT WITH MONITORING**
+- If all areas look good → **PROCEED with dependency addition**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory dependency assessment"
+- "Dependency has [no/minor/major] concerns"
+- "Based on this assessment, I am [finding alternatives/proceeding with monitoring/proceeding]"
+
+## Core Dependency Management Requirements
+
+### A. Dependency Necessity and Alternatives
+**DO:**
+- Evaluate if functionality can be implemented with existing dependencies
+- Consider lightweight alternatives to heavy dependencies
+- Assess the maintenance burden of adding new dependencies
+- Document why each dependency is necessary
+
+**DON'T:**
+- Add dependencies for trivial functionality
+- Use heavy frameworks when simple libraries suffice
+- Add dependencies without considering alternatives
+- Include dependencies that duplicate existing functionality
+
+**Example:**
+```python
+# Good: Justifying dependency choices
+"""
+Dependency Justification:
+
+sentence-transformers (REQUIRED):
+- Provides state-of-the-art semantic embeddings
+- Alternative: OpenAI embeddings API - rejected due to cost and latency
+- Alternative: Custom embedding model - rejected due to complexity and accuracy
+- Size: ~500MB with models, but essential for core RAG functionality
+
+python-docx (REQUIRED):
+- Handles complex .docx parsing from Nexis exports
+- Alternative: docx2txt - rejected due to loss of formatting information
+- Alternative: python-docx2txt - rejected due to incomplete parsing
+- Size: ~1MB, minimal impact
+
+anthropic (REQUIRED):
+- Official Claude API client with proper authentication
+- Alternative: Direct HTTP requests - rejected due to complexity and maintenance
+- Alternative: OpenAI - rejected as we specifically need Claude
+- Size: ~10MB, reasonable for API client
+"""
+```
+
+### B. Version Pinning and Compatibility
+**DO:**
+- Pin major versions for critical dependencies
+- Use version ranges for minor updates when safe
+- Test compatibility between dependency versions
+- Document version constraints and their reasons
+
+**DON'T:**
+- Use unpinned versions in production
+- Pin minor versions without good reason
+- Ignore dependency conflicts
+- Skip testing with pinned versions
+
+**Example pyproject.toml:**
+```toml
+[project]
+dependencies = [
+    # Core functionality - pin major versions
+    "anthropic>=0.34.0,<1.0.0",  # API stability critical
+    "sentence-transformers>=2.2.0,<3.0.0",  # Model compatibility
+    "python-docx>=0.8.11,<2.0.0",  # Parsing stability
+    
+    # Utilities - allow minor updates
+    "click>=8.0.0,<9.0.0",  # CLI interface
+    "pydantic>=2.0.0,<3.0.0",  # Data validation
+    
+    # Infrastructure - more flexible
+    "httpx>=0.24.0",  # HTTP client, patch updates OK
+    "numpy>=1.21.0",  # Math operations, maintained well
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+]
+
+# Document version constraints
+[tool.dependency-constraints]
+# sentence-transformers pinned to <3.0.0 due to potential breaking changes
+# in embedding model interfaces that would require extensive testing
+sentence-transformers = "Model loading API may change in 3.x"
+
+# anthropic pinned to <1.0.0 as 1.x may introduce breaking changes
+# in authentication or response formats
+anthropic = "API client may have breaking changes in 1.x"
+```
+
+### C. Security and Maintenance Monitoring
+**DO:**
+- Regularly audit dependencies for security vulnerabilities
+- Monitor dependency maintenance status and update frequency
+- Use tools like `pip-audit` or `safety` for security scanning
+- Track dependency licenses for compliance
+
+**DON'T:**
+- Ignore security advisories for dependencies
+- Use abandoned or unmaintained dependencies
+- Skip license compatibility checks
+- Defer security updates indefinitely
+
+**Example Security Monitoring:**
+```python
+# Security monitoring script (can be added to CI/CD)
+"""
+Dependency Security Checklist:
+
+1. Run security audit:
+   pip install pip-audit
+   pip-audit
+
+2. Check for outdated packages:
+   pip list --outdated
+
+3. Review dependency licenses:
+   pip-licenses
+
+4. Monitor critical dependencies:
+   - sentence-transformers: Check HuggingFace security advisories
+   - anthropic: Monitor Anthropic API changes and security updates
+   - python-docx: Check for parsing vulnerabilities
+
+5. Set up automated monitoring:
+   - GitHub Dependabot for automatic security updates
+   - Snyk or similar service for continuous monitoring
+   - Regular dependency review in team meetings
+"""
+```
+
+### D. Lazy Loading and Optional Dependencies
+**DO:**
+- Import heavy dependencies only when needed
+- Provide graceful degradation when optional dependencies are missing
+- Use conditional imports with clear error messages
+- Document which dependencies are optional and their purposes
+
+**DON'T:**
+- Import heavy dependencies at module level
+- Fail silently when optional dependencies are missing
+- Make dependencies seem required when they're optional
+- Skip documenting optional dependency benefits
+
+**Example:**
+```python
+# Good: Lazy loading with clear error handling
+class EmbeddingProvider:
+    def __init__(self):
+        self._model = None
+        self._dependencies_checked = False
+    
+    def _ensure_dependencies(self):
+        """Ensure required ML dependencies are available."""
+        if self._dependencies_checked:
+            return
+        
+        try:
+            # Lazy import heavy dependencies
+            import sentence_transformers
+            import torch
+            import numpy as np
+            
+            self._sentence_transformers = sentence_transformers
+            self._torch = torch
+            self._np = np
+            self._dependencies_available = True
+            
+        except ImportError as e:
+            missing_package = str(e).split("'")[1] if "'" in str(e) else "unknown"
+            raise ImportError(
+                f"Missing required dependency: {missing_package}\n"
+                f"Install with: pip install sentence-transformers torch numpy\n"
+                f"This is required for embedding generation in RAG mode."
+            ) from e
+        
+        self._dependencies_checked = True
+    
+    def generate_embedding(self, text: str) -> List[float]:
+        self._ensure_dependencies()
+        
+        if self._model is None:
+            # Load model only when first needed
+            self._model = self._sentence_transformers.SentenceTransformer('all-MiniLM-L6-v2')
+        
+        return self._model.encode(text).tolist()
+
+# Document optional dependencies clearly
+"""
+Optional Dependencies:
+
+GPU Acceleration (optional):
+- torch with CUDA support: Faster embedding generation
+- Install with: pip install torch --index-url https://download.pytorch.org/whl/cu118
+- Fallback: CPU-only torch (slower but functional)
+
+Development Tools (optional):
+- black: Code formatting
+- mypy: Type checking  
+- pytest: Testing framework
+- Install with: pip install -e .[dev]
+"""
+```
+
+### E. Dependency Isolation and Virtual Environments
+**DO:**
+- Use virtual environments for development and deployment
+- Document environment setup procedures
+- Provide multiple installation methods (pip, conda, poetry)
+- Test installation in clean environments
+
+**DON'T:**
+- Install dependencies globally
+- Skip documenting environment setup
+- Assume users have specific Python versions
+- Mix development and production dependencies
+
+**Example Installation Documentation:**
+```markdown
+## Installation Methods
+
+### Method 1: pip with virtual environment (Recommended)
+```bash
+# Create virtual environment
+python -m venv claude-qa-env
+source claude-qa-env/bin/activate  # On Windows: claude-qa-env\Scripts\activate
+
+# Install package
+pip install -e .
+
+# Set up API key
+export ANTHROPIC_API_KEY="your-key-here"
+```
+
+### Method 2: conda environment
+```bash
+# Create conda environment
+conda create -n claude-qa python=3.9
+conda activate claude-qa
+
+# Install dependencies
+pip install -e .
+```
+
+### Method 3: Development installation
+```bash
+# Install with development dependencies
+pip install -e .[dev]
+
+# Run tests to verify installation
+pytest
+```
+
+## Troubleshooting Dependencies
+
+### Common Issues:
+1. **torch installation fails**: Use CPU-only version or conda
+2. **sentence-transformers model download**: Ensure internet connection
+3. **Windows path issues**: Use forward slashes in paths
+4. **Permission errors**: Use virtual environment instead of global install
+```
+
+### F. Dependency Update Strategy
+**DO:**
+- Establish regular dependency update schedules
+- Test updates in staging environments before production
+- Document breaking changes and migration steps
+- Maintain changelog of dependency updates
+
+**DON'T:**
+- Update all dependencies simultaneously
+- Skip testing after dependency updates
+- Ignore breaking change announcements
+- Update production without staging validation
+
+**Update Process:**
+```python
+"""
+Dependency Update Process:
+
+1. Monthly Review:
+   - Check for security updates (immediate priority)
+   - Review major version updates (plan for next sprint)
+   - Update patch versions (low risk)
+
+2. Update Testing:
+   - Run full test suite with new versions
+   - Test with realistic data sets
+   - Verify CLI functionality end-to-end
+   - Check performance impact
+
+3. Documentation:
+   - Update version constraints in pyproject.toml
+   - Document any breaking changes
+   - Update installation instructions if needed
+   - Notify users of significant changes
+
+4. Rollback Plan:
+   - Keep previous working versions documented
+   - Test rollback procedure
+   - Maintain compatibility shims if needed
+"""
+```
+
+This rule ensures that dependencies enhance the project without introducing unnecessary complexity, security risks, or maintenance burden.

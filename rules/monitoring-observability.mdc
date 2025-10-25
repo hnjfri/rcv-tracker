@@ -1,0 +1,562 @@
+---
+alwaysApply: true
+priority: medium
+context: ["monitoring", "observability", "performance", "debugging"]
+---
+
+# Monitoring and Observability Standards
+
+All code must include appropriate monitoring, metrics collection, and observability features to enable effective debugging, performance optimization, and system health monitoring.
+
+## MANDATORY CHECKPOINT: Before implementing system-critical functionality
+
+### Observability Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "How will I know if this code is working correctly in production?"
+
+**Required Analysis - Check ALL 6 areas:**
+1. **Metrics collection** - What key metrics should be tracked for this functionality?
+2. **Health monitoring** - How can I detect when this component is failing or degraded?
+3. **Performance tracking** - What performance indicators are critical to monitor?
+4. **Error visibility** - How will errors and failures be detected and diagnosed?
+5. **User impact** - How will I measure the user experience impact of this code?
+6. **Debugging support** - What information is needed to troubleshoot issues?
+
+**Required Response:**
+- If critical observability missing → **IMPLEMENT MONITORING BEFORE PROCEEDING**
+- If observability incomplete → **ENHANCE MONITORING COVERAGE**
+- If comprehensive monitoring exists → **PROCEED with implementation**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory observability assessment"
+- "Observability coverage is [comprehensive/adequate/incomplete]"
+- "Based on this assessment, I am [implementing monitoring/enhancing/proceeding]"
+
+## Core Monitoring Requirements
+
+### A. Metrics Collection for Key Operations
+**DO:**
+- Track timing metrics for all critical operations
+- Count success/failure rates for important processes
+- Monitor resource usage (memory, CPU, disk)
+- Measure user-facing performance indicators
+
+**DON'T:**
+- Skip metrics for performance-critical operations
+- Collect metrics without considering their purpose
+- Ignore resource consumption monitoring
+- Forget to track error rates alongside success metrics
+
+**Example:**
+```python
+# Good: Comprehensive metrics collection
+import time
+import logging
+from typing import Dict, Any, Optional
+from functools import wraps
+from dataclasses import dataclass, field
+from collections import defaultdict, deque
+import threading
+
+@dataclass
+class OperationMetrics:
+    """Metrics for a specific operation."""
+    name: str
+    total_calls: int = 0
+    successful_calls: int = 0
+    failed_calls: int = 0
+    total_duration: float = 0.0
+    min_duration: float = float('inf')
+    max_duration: float = 0.0
+    recent_durations: deque = field(default_factory=lambda: deque(maxlen=100))
+    error_types: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
+
+class MetricsCollector:
+    """Centralized metrics collection system."""
+    
+    def __init__(self):
+        self.metrics: Dict[str, OperationMetrics] = {}
+        self._lock = threading.Lock()
+        self.logger = logging.getLogger(__name__)
+    
+    def record_operation(self, operation_name: str, duration: float, 
+                        success: bool, error_type: str = None) -> None:
+        """Record metrics for an operation."""
+        with self._lock:
+            if operation_name not in self.metrics:
+                self.metrics[operation_name] = OperationMetrics(name=operation_name)
+            
+            metrics = self.metrics[operation_name]
+            metrics.total_calls += 1
+            metrics.total_duration += duration
+            metrics.recent_durations.append(duration)
+            
+            if duration < metrics.min_duration:
+                metrics.min_duration = duration
+            if duration > metrics.max_duration:
+                metrics.max_duration = duration
+            
+            if success:
+                metrics.successful_calls += 1
+            else:
+                metrics.failed_calls += 1
+                if error_type:
+                    metrics.error_types[error_type] += 1
+    
+    def get_operation_summary(self, operation_name: str) -> Dict[str, Any]:
+        """Get summary statistics for an operation."""
+        if operation_name not in self.metrics:
+            return {}
+        
+        metrics = self.metrics[operation_name]
+        
+        # Calculate derived metrics
+        avg_duration = metrics.total_duration / metrics.total_calls if metrics.total_calls > 0 else 0
+        success_rate = metrics.successful_calls / metrics.total_calls if metrics.total_calls > 0 else 0
+        
+        # Recent performance (last 100 operations)
+        recent_avg = sum(metrics.recent_durations) / len(metrics.recent_durations) if metrics.recent_durations else 0
+        
+        return {
+            'operation': operation_name,
+            'total_calls': metrics.total_calls,
+            'success_rate': success_rate,
+            'avg_duration_seconds': avg_duration,
+            'recent_avg_duration_seconds': recent_avg,
+            'min_duration_seconds': metrics.min_duration if metrics.min_duration != float('inf') else 0,
+            'max_duration_seconds': metrics.max_duration,
+            'error_breakdown': dict(metrics.error_types),
+            'performance_trend': 'improving' if recent_avg < avg_duration else 'stable' if recent_avg == avg_duration else 'degrading'
+        }
+    
+    def get_all_metrics_summary(self) -> Dict[str, Dict[str, Any]]:
+        """Get summary for all tracked operations."""
+        return {name: self.get_operation_summary(name) for name in self.metrics.keys()}
+
+# Global metrics collector instance
+metrics_collector = MetricsCollector()
+
+def monitor_operation(operation_name: str):
+    """Decorator to automatically monitor operation performance."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            success = True
+            error_type = None
+            
+            try:
+                result = func(*args, **kwargs)
+                return result
+            except Exception as e:
+                success = False
+                error_type = type(e).__name__
+                raise
+            finally:
+                duration = time.time() - start_time
+                metrics_collector.record_operation(operation_name, duration, success, error_type)
+                
+                # Log performance information
+                logger = logging.getLogger(func.__module__)
+                if success:
+                    logger.info(f"{operation_name} completed in {duration:.3f}s")
+                else:
+                    logger.error(f"{operation_name} failed after {duration:.3f}s with {error_type}")
+        
+        return wrapper
+    return decorator
+
+# Usage examples
+@monitor_operation("document_processing")
+def process_document(file_path: str) -> Dict[str, Any]:
+    """Process a document with automatic monitoring."""
+    # Implementation here
+    pass
+
+@monitor_operation("embedding_generation")  
+def generate_embeddings(texts: List[str]) -> List[List[float]]:
+    """Generate embeddings with monitoring."""
+    # Implementation here
+    pass
+```
+
+### B. Health Checks and System Status
+**DO:**
+- Implement health check endpoints for critical components
+- Monitor external dependency availability
+- Track system resource usage
+- Provide status information for debugging
+
+**DON'T:**
+- Skip health checks for external dependencies
+- Ignore system resource constraints
+- Provide health checks without actionable information
+- Forget to monitor long-running operations
+
+**Example:**
+```python
+# Good: Comprehensive health monitoring
+from enum import Enum
+from typing import List, Dict, Any
+import psutil
+import sqlite3
+import requests
+from datetime import datetime, timedelta
+
+class HealthStatus(Enum):
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+
+@dataclass
+class HealthCheck:
+    """Individual health check result."""
+    name: str
+    status: HealthStatus
+    message: str
+    details: Dict[str, Any] = None
+    checked_at: datetime = field(default_factory=datetime.now)
+
+class SystemHealthMonitor:
+    """Monitor overall system health."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+    
+    def check_database_health(self, db_path: str) -> HealthCheck:
+        """Check database connectivity and performance."""
+        try:
+            start_time = time.time()
+            
+            with sqlite3.connect(db_path, timeout=5.0) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+                table_count = cursor.fetchone()[0]
+                
+                # Test query performance
+                cursor.execute("SELECT COUNT(*) FROM original_articles LIMIT 1")
+                
+            connection_time = time.time() - start_time
+            
+            if connection_time > 2.0:
+                return HealthCheck(
+                    name="database",
+                    status=HealthStatus.DEGRADED,
+                    message=f"Database slow to respond ({connection_time:.2f}s)",
+                    details={"connection_time": connection_time, "table_count": table_count}
+                )
+            
+            return HealthCheck(
+                name="database", 
+                status=HealthStatus.HEALTHY,
+                message="Database accessible and responsive",
+                details={"connection_time": connection_time, "table_count": table_count}
+            )
+            
+        except Exception as e:
+            return HealthCheck(
+                name="database",
+                status=HealthStatus.UNHEALTHY,
+                message=f"Database connection failed: {e}",
+                details={"error": str(e)}
+            )
+    
+    def check_api_health(self) -> HealthCheck:
+        """Check external API connectivity."""
+        try:
+            # Test Anthropic API connectivity (without making a real request)
+            api_key = os.getenv('ANTHROPIC_API_KEY')
+            if not api_key:
+                return HealthCheck(
+                    name="anthropic_api",
+                    status=HealthStatus.UNHEALTHY,
+                    message="API key not configured",
+                    details={"error": "ANTHROPIC_API_KEY environment variable missing"}
+                )
+            
+            # Could add actual API health check here if needed
+            return HealthCheck(
+                name="anthropic_api",
+                status=HealthStatus.HEALTHY,
+                message="API key configured",
+                details={"api_key_configured": True}
+            )
+            
+        except Exception as e:
+            return HealthCheck(
+                name="anthropic_api",
+                status=HealthStatus.UNHEALTHY,
+                message=f"API health check failed: {e}",
+                details={"error": str(e)}
+            )
+    
+    def check_system_resources(self) -> HealthCheck:
+        """Check system resource availability."""
+        try:
+            # Check memory usage
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            details = {
+                "memory_percent": memory.percent,
+                "memory_available_gb": memory.available / (1024**3),
+                "disk_percent": disk.percent,
+                "disk_free_gb": disk.free / (1024**3)
+            }
+            
+            # Determine status based on resource usage
+            if memory.percent > 90 or disk.percent > 95:
+                status = HealthStatus.UNHEALTHY
+                message = "Critical resource usage"
+            elif memory.percent > 80 or disk.percent > 85:
+                status = HealthStatus.DEGRADED
+                message = "High resource usage"
+            else:
+                status = HealthStatus.HEALTHY
+                message = "Resource usage normal"
+            
+            return HealthCheck(
+                name="system_resources",
+                status=status,
+                message=message,
+                details=details
+            )
+            
+        except Exception as e:
+            return HealthCheck(
+                name="system_resources",
+                status=HealthStatus.UNHEALTHY,
+                message=f"Resource check failed: {e}",
+                details={"error": str(e)}
+            )
+    
+    def get_overall_health(self, db_path: str = None) -> Dict[str, Any]:
+        """Get comprehensive system health status."""
+        checks = []
+        
+        if db_path:
+            checks.append(self.check_database_health(db_path))
+        
+        checks.append(self.check_api_health())
+        checks.append(self.check_system_resources())
+        
+        # Determine overall status
+        statuses = [check.status for check in checks]
+        if HealthStatus.UNHEALTHY in statuses:
+            overall_status = HealthStatus.UNHEALTHY
+        elif HealthStatus.DEGRADED in statuses:
+            overall_status = HealthStatus.DEGRADED
+        else:
+            overall_status = HealthStatus.HEALTHY
+        
+        return {
+            "overall_status": overall_status.value,
+            "checked_at": datetime.now().isoformat(),
+            "individual_checks": [
+                {
+                    "name": check.name,
+                    "status": check.status.value,
+                    "message": check.message,
+                    "details": check.details or {}
+                }
+                for check in checks
+            ],
+            "metrics_summary": metrics_collector.get_all_metrics_summary()
+        }
+```
+
+### C. Performance Tracking and Alerting
+**DO:**
+- Set performance baselines and track deviations
+- Monitor response times for user-facing operations
+- Alert on significant performance degradation
+- Track resource usage trends over time
+
+**DON'T:**
+- Ignore gradual performance degradation
+- Set alerts without considering normal variance
+- Skip monitoring of user-impacting operations
+- Forget to track performance trends
+
+**Example:**
+```python
+# Good: Performance tracking with alerting
+class PerformanceTracker:
+    """Track and alert on performance metrics."""
+    
+    def __init__(self):
+        self.baselines: Dict[str, float] = {}
+        self.alert_thresholds: Dict[str, float] = {
+            'document_processing': 30.0,  # Alert if > 30s per document
+            'embedding_generation': 5.0,   # Alert if > 5s for embeddings
+            'rag_query': 15.0,            # Alert if > 15s for RAG queries
+        }
+        self.logger = logging.getLogger(__name__)
+    
+    def set_baseline(self, operation: str, baseline_duration: float) -> None:
+        """Set performance baseline for an operation."""
+        self.baselines[operation] = baseline_duration
+        self.logger.info(f"Set performance baseline for {operation}: {baseline_duration:.2f}s")
+    
+    def check_performance_alert(self, operation: str, duration: float) -> bool:
+        """Check if performance warrants an alert."""
+        threshold = self.alert_thresholds.get(operation)
+        if threshold and duration > threshold:
+            self.logger.warning(
+                f"Performance alert: {operation} took {duration:.2f}s "
+                f"(threshold: {threshold:.2f}s)"
+            )
+            return True
+        
+        # Check against baseline if available
+        baseline = self.baselines.get(operation)
+        if baseline and duration > baseline * 2:  # 2x baseline threshold
+            self.logger.warning(
+                f"Performance degradation: {operation} took {duration:.2f}s "
+                f"(baseline: {baseline:.2f}s, ratio: {duration/baseline:.1f}x)"
+            )
+            return True
+        
+        return False
+    
+    def get_performance_report(self) -> Dict[str, Any]:
+        """Generate performance report with trends."""
+        report = {
+            "baselines": self.baselines.copy(),
+            "alert_thresholds": self.alert_thresholds.copy(),
+            "current_metrics": {},
+            "performance_alerts": []
+        }
+        
+        # Add current metrics from metrics collector
+        for operation_name in self.alert_thresholds.keys():
+            summary = metrics_collector.get_operation_summary(operation_name)
+            if summary:
+                report["current_metrics"][operation_name] = summary
+                
+                # Check for performance issues
+                recent_avg = summary.get("recent_avg_duration_seconds", 0)
+                if self.check_performance_alert(operation_name, recent_avg):
+                    report["performance_alerts"].append({
+                        "operation": operation_name,
+                        "current_avg": recent_avg,
+                        "threshold": self.alert_thresholds.get(operation_name),
+                        "baseline": self.baselines.get(operation_name)
+                    })
+        
+        return report
+
+# Global performance tracker
+performance_tracker = PerformanceTracker()
+```
+
+### D. User Activity and Usage Analytics
+**DO:**
+- Track user interaction patterns (anonymized)
+- Monitor feature usage and adoption
+- Measure user success rates
+- Collect feedback on user experience
+
+**DON'T:**
+- Collect personally identifiable information
+- Track users without their knowledge
+- Ignore user experience metrics
+- Skip anonymization of usage data
+
+**Example:**
+```python
+# Good: Privacy-respecting usage analytics
+import hashlib
+from typing import Optional
+
+class UsageAnalytics:
+    """Track anonymized usage patterns."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.session_id = self._generate_session_id()
+    
+    def _generate_session_id(self) -> str:
+        """Generate anonymous session identifier."""
+        import uuid
+        return str(uuid.uuid4())[:8]  # Short anonymous ID
+    
+    def track_query(self, query_type: str, success: bool, 
+                   processing_time: float, result_count: Optional[int] = None) -> None:
+        """Track query usage without storing sensitive data."""
+        self.logger.info("User query tracked", extra={
+            'session_id': self.session_id,
+            'query_type': query_type,
+            'success': success,
+            'processing_time': processing_time,
+            'result_count': result_count,
+            'timestamp': datetime.now().isoformat(),
+            'analytics': True  # Flag for analytics processing
+        })
+    
+    def track_document_processing(self, doc_count: int, success_count: int, 
+                                total_time: float) -> None:
+        """Track document processing statistics."""
+        self.logger.info("Document processing tracked", extra={
+            'session_id': self.session_id,
+            'documents_processed': doc_count,
+            'successful_documents': success_count,
+            'total_processing_time': total_time,
+            'avg_time_per_document': total_time / doc_count if doc_count > 0 else 0,
+            'success_rate': success_count / doc_count if doc_count > 0 else 0,
+            'timestamp': datetime.now().isoformat(),
+            'analytics': True
+        })
+
+# Global usage analytics
+usage_analytics = UsageAnalytics()
+```
+
+## Monitoring Integration Points
+
+### CLI Integration
+```python
+# Add monitoring to CLI operations
+@click.command()
+@click.argument('question')
+@click.option('--rag-mode', is_flag=True)
+def query_command(question: str, rag_mode: bool):
+    """CLI command with integrated monitoring."""
+    start_time = time.time()
+    
+    try:
+        if rag_mode:
+            result = process_rag_query(question)
+            usage_analytics.track_query('rag', True, time.time() - start_time, len(result))
+        else:
+            result = process_traditional_query(question)
+            usage_analytics.track_query('traditional', True, time.time() - start_time)
+        
+        click.echo(result)
+        
+    except Exception as e:
+        usage_analytics.track_query('rag' if rag_mode else 'traditional', False, time.time() - start_time)
+        raise
+```
+
+### Periodic Health Reports
+```python
+def generate_health_report(db_path: str) -> None:
+    """Generate and log periodic health report."""
+    health_monitor = SystemHealthMonitor()
+    health_status = health_monitor.get_overall_health(db_path)
+    performance_report = performance_tracker.get_performance_report()
+    
+    logger.info("System health report", extra={
+        'health_status': health_status,
+        'performance_report': performance_report,
+        'report_type': 'health_check',
+        'timestamp': datetime.now().isoformat()
+    })
+    
+    # Alert if system is unhealthy
+    if health_status['overall_status'] != 'healthy':
+        logger.error(f"System health alert: {health_status['overall_status']}")
+```
+
+This rule ensures comprehensive observability that enables proactive monitoring, quick issue resolution, and continuous performance optimization.

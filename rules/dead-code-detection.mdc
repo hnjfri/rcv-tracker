@@ -1,0 +1,121 @@
+---
+alwaysApply: true
+priority: medium
+context: ["refactoring", "cleanup", "maintenance"]
+---
+
+# Dead Code Detection and Removal
+
+Regularly identify and safely remove unused code to maintain a clean, maintainable codebase.
+
+## MANDATORY CHECKPOINT: Before completing any significant code changes
+
+### Dead Code Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "What unused code exists in the current scope that can be safely removed?"
+
+**Required Analysis:**
+1. **Unused imports** - Are there any imports not referenced in the file?
+2. **Unused functions/methods** - Are there any functions with no callers?
+3. **Unused classes** - Are there any classes that are never instantiated?
+4. **Unused variables** - Are there any variables that are assigned but never read?
+5. **Unreachable code** - Are there any code paths that can never be executed?
+6. **Deprecated patterns** - Are there any old implementations superseded by new ones?
+
+### Verification Requirements
+Before recommending removal, you MUST:
+- **Search the entire codebase** for references using semantic search or grep
+- **Check test files** for usage in tests (tests may be the only users)
+- **Verify import chains** - code might be imported elsewhere even if not used locally
+- **Confirm deprecation status** - ensure replacement functionality exists and works
+
+### Safe Removal Protocol
+1. **Document findings** - List specific dead code identified with evidence
+2. **Provide removal plan** - Specify exactly what to remove and why it's safe
+3. **Suggest testing strategy** - Recommend tests to run to verify safe removal
+4. **Offer rollback plan** - Explain how to restore if issues arise
+
+## Examples of Dead Code to Detect
+
+### Definitely Dead (Safe to Remove)
+- Unused imports with no references in the file
+- Private methods with no callers within the class
+- Variables assigned but never read
+- Commented-out code blocks (after confirming they're not needed)
+
+### Potentially Dead (Requires Investigation)
+- Public methods with no apparent callers (might be used by external code)
+- Classes that seem unused (might be imported elsewhere)
+- Functions that appear to have no callers (might be called dynamically)
+- Configuration values that seem unused (might be used in deployment)
+
+### Not Dead Code (Do Not Remove)
+- Public API methods (even if not currently used)
+- Abstract methods in base classes
+- Methods called dynamically (e.g., via getattr)
+- Code used only in tests
+- Backward compatibility shims
+- Error handling code that appears "unused"
+
+## Dead Code Removal Checklist
+
+### Before Removal
+- [ ] Searched entire codebase for references
+- [ ] Checked all test files for usage
+- [ ] Verified no dynamic calls (getattr, eval, etc.)
+- [ ] Confirmed no external dependencies
+- [ ] Identified replacement functionality (if applicable)
+- [ ] Created list of tests to run post-removal
+
+### During Removal
+- [ ] Remove in logical chunks (not all at once)
+- [ ] Update related documentation
+- [ ] Remove associated tests if they test removed code
+- [ ] Update imports and dependencies
+- [ ] Check for broken references
+
+### After Removal
+- [ ] Run full test suite
+- [ ] Verify application still functions correctly
+- [ ] Check for any runtime errors
+- [ ] Update documentation if needed
+- [ ] Commit changes with clear description
+
+## Rigorous Testing Strategy
+
+### Automated Testing
+- Run complete test suite after each removal
+- Check for import errors and missing references
+- Verify all functionality still works as expected
+- Use static analysis tools to catch issues
+
+### Manual Verification
+- Test key user workflows
+- Verify CLI commands still work
+- Check database operations function correctly
+- Confirm API endpoints respond properly
+
+### Rollback Preparation
+- Keep detailed record of what was removed
+- Maintain git history for easy rollback
+- Document any configuration changes made
+- Have restoration procedure ready
+
+## Benefits of Dead Code Removal
+
+1. **Reduced Complexity** - Less code to understand and maintain
+2. **Improved Performance** - Faster imports and reduced memory usage
+3. **Cleaner Codebase** - Easier navigation and comprehension
+4. **Reduced Technical Debt** - Less legacy code to maintain
+5. **Better Testing** - Focus testing efforts on active code
+6. **Easier Refactoring** - Fewer dependencies to consider
+
+## Warning Signs of Risky Removal
+
+- Code that was recently added (might be work in progress)
+- Methods with generic names that might be called dynamically
+- Code in core modules that many other modules import
+- Configuration or setup code that might be used in deployment
+- Code that handles edge cases or error conditions
+- Backward compatibility code for older versions
+
+This rule ensures that dead code removal is done safely and systematically, with proper verification and testing at each step.

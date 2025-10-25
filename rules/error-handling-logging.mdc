@@ -1,0 +1,429 @@
+---
+alwaysApply: true
+priority: high
+context: ["error-handling", "logging", "debugging"]
+---
+
+# Error Handling and Logging Standards
+
+All code must implement comprehensive error handling with structured logging for debugging, monitoring, and user experience.
+
+## ENTERPRISE-GRADE LOGGING PRINCIPLES (MANDATORY)
+
+### Separation of Concerns: User Output vs. Application Logs
+- DO: Treat user-facing console output (CLI prompts, progress, success banners) as UI, not logs
+- DO: Log operational events to the configured logger, not via `print()`
+- DO: Avoid duplicate messages. A message rendered to the console UI must not be logged again at the same level
+- DO: For UI messages, only log warnings and errors; suppress info/success UI messages from the logger
+- DON'T: Mix `print()` and `logger.info()` for the same message
+
+### Structured, Context-Rich Logs
+- DO: Use structured logs with consistent fields (operation, state, session_id, file, duration, status, error_type)
+- DO: Include correlation/request IDs when available; generate one per CLI invocation if missing
+- DO: Prefer key-value context via `extra={...}`
+- DO: Ensure timestamps include timezone or are UTC
+
+### Sensitive Data Handling
+- DO: Redact secrets, API keys, auth tokens, and PII from logs
+- DON'T: Log full payloads or raw document contents; log counts, hashes, or metadata instead
+
+### Log Levels and Signal-to-Noise
+- DEBUG: Diagnostic details safe to disable in production
+- INFO: High-level milestones (start/finish operations), counts, durations
+- WARNING: Unexpected but recoverable issues
+- ERROR: Operation failed; include actionable context
+- CRITICAL: Process cannot continue; immediate attention required
+- DON'T: Use INFO to mirror every UI line; prefer DEBUG for verbose tracing
+
+### Consistent Formatting and Transport
+- Default console handler: human-readable, concise
+- File (or JSON) handler: structured logging suitable for ingestion
+- Provide opt-in JSON logging via env `JSON_LOGS=true` without breaking tests/CLIs
+- Avoid double-propagation; ensure handlers and `propagate` settings prevent duplicates
+
+### Centralized Logging Configuration (MANDATORY)
+- All modules must obtain a logger from a single configuration function (e.g., `setup_logging`)
+- DO NOT configure handlers/formatters in individual modules
+- The composition container is responsible for logger creation and passing it via DI
+- Tests may override verbosity/format via the centralized function only
+
+### Unified Logging Style (MANDATORY)
+- Single logger namespace: root logger `legiscan_loader`; child loggers per module (e.g., `legiscan_loader.commands`)
+- One format per transport:
+  - Console (human): concise text, no duplicate UI lines, WARNING+ by default
+  - File/JSON: structured payloads; include operation, status, duration, counts
+- UI vs Logs:
+  - UI (print): human-friendly messages. Use prefixes only for non-info levels:
+    - info: plain text without any prefix
+    - success: `[SUCCESS] ...`
+    - warning: `[WARNING] ...`
+    - error: `[ERROR] ...`
+    Avoid `[INFO]` spam entirely
+  - Logs: never mirror UI info/success lines; only warnings/errors from UI may be logged
+- Message style:
+  - Present tense, consistent capitalization, no trailing periods for non-sentences
+  - Redact secrets; log counts/ids not payloads
+  - Use `extra={"operation": ..., "context": {...}}` for key fields; prefer snake_case keys
+- Correlation:
+  - Generate a correlation id per CLI invocation; attach to all logs in `extra`
+
+### Performance and Rate Control
+- DO: Log timing and counts for critical operations
+- DO: Consider sampling or aggregation for high-volume events
+- DON'T: Log inside tight loops without purpose
+
+### Testability
+- Tests must not assert on incidental log formatting; assert on behavior
+- Provide hooks to set logger level in tests to reduce noise
+
+## MANDATORY CHECKPOINT: Before implementing error-prone operations
+
+### Error Handling Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "How can this operation fail, and how should failures be handled?"
+
+**Required Analysis - Check ALL 6 areas:**
+1. **Failure modes** - What are all the ways this operation can fail?
+2. **Error recovery** - Can the system recover gracefully from failures?
+3. **User experience** - Will users get helpful, actionable error messages?
+4. **Logging strategy** - Are errors logged with sufficient context for debugging?
+5. **Error propagation** - Should errors bubble up or be handled locally?
+6. **Resource cleanup** - Are resources properly cleaned up on errors?
+
+**Required Response:**
+- If critical failure modes unhandled → **IMPLEMENT ERROR HANDLING FIRST**
+- If error handling incomplete → **ENHANCE ERROR HANDLING**
+- If comprehensive error handling exists → **PROCEED with implementation**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory error handling assessment"
+- "Error handling is [comprehensive/adequate/incomplete]"
+- "Based on this assessment, I am [implementing error handling/enhancing/proceeding]"
+
+## Core Error Handling Requirements
+
+### A. Exception Hierarchy and Custom Exceptions
+**DO:**
+- Create specific exception classes for different error types
+- Use exception chaining to preserve error context
+- Include helpful error messages with context
+- Inherit from appropriate base exception classes
+
+**DON'T:**
+- Raise generic Exception for specific errors
+- Lose original exception context
+- Use error messages that don't help users
+- Create overly deep exception hierarchies
+
+**Example:**
+```python
+# Good: Specific exception hierarchy
+class ClaudeQAError(Exception):
+    """Base exception for Claude QA application."""
+    pass
+
+class DocumentProcessingError(ClaudeQAError):
+    """Raised when document processing fails."""
+    def __init__(self, message: str, file_path: str = None, cause: Exception = None):
+        super().__init__(message)
+        self.file_path = file_path
+        self.cause = cause
+
+class DatabaseError(ClaudeQAError):
+    """Raised when database operations fail."""
+    pass
+
+# Usage with context preservation
+try:
+    process_document(file_path)
+except FileNotFoundError as e:
+    raise DocumentProcessingError(
+        f"Document not found: {file_path}",
+        file_path=file_path,
+        cause=e
+    ) from e
+```
+
+### B. Graceful Degradation and Recovery
+**DO:**
+- Provide fallback mechanisms when possible
+- Retry transient failures with exponential backoff
+- Continue processing other items when one fails
+- Preserve partial results when operations partially succeed
+
+**DON'T:**
+- Fail entire operations for single item failures
+- Retry indefinitely without backoff
+- Lose all progress on any failure
+- Ignore opportunities for graceful degradation
+
+**Example:**
+```python
+# Good: Graceful degradation with retry
+import time
+import random
+
+def process_documents_with_retry(file_paths: List[str]) -> Dict[str, Any]:
+    results = {
+        'successful': [],
+        'failed': [],
+        'partial_failures': []
+    }
+    
+    for file_path in file_paths:
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = process_single_document(file_path)
+                results['successful'].append(result)
+                break
+            except TransientError as e:
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    logger.warning(f"Retrying {file_path} in {wait_time:.1f}s (attempt {attempt + 1})")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to process {file_path} after {max_retries} attempts: {e}")
+                    results['failed'].append({'file_path': file_path, 'error': str(e)})
+            except PermanentError as e:
+                logger.error(f"Permanent failure processing {file_path}: {e}")
+                results['failed'].append({'file_path': file_path, 'error': str(e)})
+                break
+    
+    return results
+```
+
+### C. User-Friendly Error Messages
+**DO:**
+- Provide clear, actionable error messages for users
+- Suggest specific steps to resolve issues
+- Use non-technical language for user-facing errors
+- Include relevant context (file names, expected formats)
+
+**DON'T:**
+- Show technical stack traces to end users
+- Use jargon or technical terminology
+- Provide error messages without context
+- Give up without suggesting solutions
+
+**Example:**
+```python
+# Good: User-friendly error handling
+class UserFriendlyErrorHandler:
+    def handle_document_error(self, error: DocumentProcessingError) -> str:
+        if isinstance(error.cause, FileNotFoundError):
+            return (
+                f"Could not find the document '{error.file_path}'. "
+                f"Please check that the file exists and you have permission to read it."
+            )
+        elif isinstance(error.cause, PermissionError):
+            return (
+                f"Permission denied accessing '{error.file_path}'. "
+                f"Please check file permissions or run with appropriate privileges."
+            )
+        elif "corrupted" in str(error).lower():
+            return (
+                f"The document '{error.file_path}' appears to be corrupted. "
+                f"Please try with a different file or re-download the original."
+            )
+        else:
+            return (
+                f"Unable to process document '{error.file_path}'. "
+                f"Please ensure it's a valid .docx file and try again."
+            )
+```
+
+### D. Structured Logging Standards
+**DO:**
+- Use consistent log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- Include relevant context in log messages
+- Use structured logging with key-value pairs
+- Log at appropriate verbosity levels
+- Never duplicate UI console messages in logs at the same level; only warnings/errors from UI may be logged
+
+**DON'T:**
+- Mix print statements with logging
+- Log sensitive information
+- Use inconsistent log formats
+- Over-log or under-log operations
+ - Log the same message twice (e.g., UI print + logger.info of identical text)
+
+**Example:**
+```python
+# Good: Structured logging
+import logging
+from typing import Dict, Any
+
+class StructuredLogger:
+    def __init__(self, name: str):
+        self.logger = logging.getLogger(name)
+    
+    def log_operation_start(self, operation: str, **context):
+        self.logger.info(f"Starting {operation}", extra={
+            'operation': operation,
+            'context': context,
+            'timestamp': time.time()
+        })
+    
+    def log_operation_success(self, operation: str, duration: float, **context):
+        self.logger.info(f"Completed {operation} in {duration:.2f}s", extra={
+            'operation': operation,
+            'duration': duration,
+            'status': 'success',
+            'context': context
+        })
+    
+    def log_operation_error(self, operation: str, error: Exception, **context):
+        self.logger.error(f"Failed {operation}: {error}", extra={
+            'operation': operation,
+            'error_type': type(error).__name__,
+            'error_message': str(error),
+            'status': 'error',
+            'context': context
+        })
+```
+
+### E. Resource Cleanup and Context Management
+**DO:**
+- Use context managers (with statements) for resource management
+- Implement proper cleanup in finally blocks
+- Close files, database connections, and network resources
+- Handle cleanup errors separately from main operation errors
+
+**DON'T:**
+- Leave resources open on exceptions
+- Ignore cleanup failures
+- Mix cleanup logic with business logic
+- Assume garbage collection will handle everything
+
+**Example:**
+```python
+# Good: Proper resource management
+from contextlib import contextmanager
+import sqlite3
+
+@contextmanager
+def database_transaction(db_path: str):
+    """Context manager for database transactions with proper cleanup."""
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute("BEGIN")
+        yield conn
+        conn.commit()
+        logger.debug("Database transaction committed")
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            logger.warning(f"Database transaction rolled back due to error: {e}")
+        raise
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception as cleanup_error:
+                logger.error(f"Error closing database connection: {cleanup_error}")
+
+# Usage
+def update_database_safely(db_path: str, updates: List[Dict]):
+    try:
+        with database_transaction(db_path) as conn:
+            for update in updates:
+                # Perform database operations
+                pass
+    except DatabaseError as e:
+        logger.error(f"Database update failed: {e}")
+        raise UserFacingError("Unable to update database. Please try again.")
+```
+
+## Logging Configuration Standards
+
+### Log Levels and Usage
+- **DEBUG**: Detailed diagnostic information, typically only of interest when diagnosing problems
+- **INFO**: General information about program execution, major milestones
+- **WARNING**: Something unexpected happened, but the program can continue
+- **ERROR**: A serious problem occurred, some functionality may not work
+- **CRITICAL**: A very serious error occurred, program may not be able to continue
+
+### Log Format Standards
+```python
+# Recommended log format
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# For structured logging
+STRUCTURED_FORMAT = {
+    'timestamp': '%(asctime)s',
+    'logger': '%(name)s',
+    'level': '%(levelname)s',
+    'message': '%(message)s',
+    'module': '%(module)s',
+    'function': '%(funcName)s',
+    'line': '%(lineno)d'
+}
+
+def configure_logging(verbose: bool = False, json_logs: bool = False) -> logging.Logger:
+    """Centralized logger configuration.
+    - Single root: 'legiscan_loader'
+    - Console handler for humans; optional JSON/file handler for ingestion
+    - Prevent duplicate handlers
+    """
+    import logging, sys, json
+    logger = logging.getLogger('legiscan_loader')
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    logger.handlers.clear()
+    logger.propagate = False
+
+    console = logging.StreamHandler(sys.stdout)
+    console.setLevel(logging.DEBUG if verbose else logging.INFO)
+    if json_logs:
+        class JsonFormatter(logging.Formatter):
+            def format(self, record: logging.LogRecord) -> str:
+                payload = {
+                    'ts': self.formatTime(record, LOG_DATE_FORMAT),
+                    'logger': record.name,
+                    'level': record.levelname,
+                    'msg': record.getMessage(),
+                    'module': record.module,
+                    'func': record.funcName,
+                    'line': record.lineno,
+                }
+                if hasattr(record, 'context'):
+                    payload['context'] = record.context
+                return json.dumps(payload)
+        console.setFormatter(JsonFormatter())
+    else:
+        console.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+    logger.addHandler(console)
+
+    return logger
+```
+
+### Performance Logging
+```python
+# Log performance metrics for critical operations
+def log_performance_metrics(operation: str, duration: float, items_processed: int):
+    logger.info(f"Performance: {operation}", extra={
+        'operation': operation,
+        'duration_seconds': duration,
+        'items_processed': items_processed,
+        'items_per_second': items_processed / duration if duration > 0 else 0,
+        'performance_metric': True
+    })
+```
+
+## Error Monitoring and Alerting
+
+### Error Aggregation
+- Group similar errors to identify patterns
+- Track error frequency and trends
+- Monitor error rates by operation type
+- Identify recurring issues for proactive fixes
+
+### Health Checks
+- Implement basic health check endpoints
+- Monitor critical dependencies (database, API services)
+- Alert on service degradation
+- Provide status information for debugging
+
+This rule ensures robust error handling that improves both user experience and system maintainability through comprehensive logging and monitoring.

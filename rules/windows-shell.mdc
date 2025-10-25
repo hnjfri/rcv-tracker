@@ -1,0 +1,20 @@
+---
+alwaysApply: true
+appliesTo: ["**/*"]
+priority: high
+context: ["terminal", "commands", "shell"]
+---
+
+# Windows Shell Command Rules
+
+Target shell: Windows PowerShell (see session metadata).
+
+Do not use the following in terminal commands:
+- "&&" to chain commands (causes parser errors in this environment)
+- "cat" (or piping to cat) for output display
+
+Required practices:
+- Run commands separately instead of chaining with "&&".
+- For file output, use PowerShell-native commands like `Get-Content` (alias: `gc`) or rely on the command's own output.
+- Avoid UNIX-specific utilities; prefer Windows/PowerShell equivalents.
+

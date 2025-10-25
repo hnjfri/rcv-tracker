@@ -1,0 +1,85 @@
+---
+alwaysApply: true
+priority: high
+---
+
+# Object-Oriented Programming and SOLID Principles
+
+This project must adhere to Object-Oriented Programming (OOP) and SOLID principles. All new and refactored code should follow these guidelines.
+
+## MANDATORY CHECKPOINT: Before writing or modifying ANY Python code
+
+### Self-Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "In what 5 ways might I be violating OOP and SOLID principles with the code I intend to write/modify?"
+
+**Required Response:**
+- If you CAN identify 3+ potential violations → **DO NOT PROCEED** - Redesign the approach
+- If you CAN identify 1-2 potential violations → **ASK USER FOR GUIDANCE** on the design
+- If you CANNOT identify any violations (answer: "There are no violations") → **PROCEED with implementation**
+
+### Verification Checkpoint
+After the self-assessment, you must be able to state:
+- "I have completed the mandatory OOP/SOLID self-assessment"
+- "I identified [0/1/2/3+] potential violations of OOP and SOLID principles"
+- "Based on this assessment, I am [proceeding/asking for guidance/redesigning]"
+
+### Core Requirements
+- Prefer classes over free functions for orchestrating behavior. Keep data and behavior that change together in the same class.
+- Apply Dependency Injection for external services (HTTP clients, databases, models, file I/O) to enable testability and substitution.
+- Keep public APIs stable; introduce adapters/wrappers when migrating to OOP to avoid breaking callers.
+- Organize modules by responsibilities (transport, domain logic, presentation/prompt building), not by technology alone.
+
+### SOLID Checklist
+- Single Responsibility: Each class/module must have one reason to change. Avoid god classes and utility dumps.
+- Open/Closed: New behavior should be added via extension (new classes/strategies), not by editing stable core logic.
+- Liskov Substitution: Components must be swappable without breaking callers. Respect method contracts and invariants.
+- Interface Segregation: Depend on small, focused interfaces (protocols/ABCs). Avoid forcing callers to implement unused methods.
+- Dependency Inversion: High-level modules own the abstractions; low-level modules implement them. Inject dependencies into constructors.
+
+### Compliance Requirements (SRP, OCP, DIP)
+- SRP Compliance: Factor repeated workflows/UX into shared helpers or dedicated services. Keep orchestration separate from transport/formatting. Do not duplicate policy logic across commands/classes.
+- OCP Compliance: Prefer adding new strategies/services over modifying core orchestrators. Route via factories/registries so new behavior is added, not edited into existing code.
+- DIP Compliance: Depend on abstractions. Pass in collaborators (clients, repositories, filesystem, UI) via constructors or factories; avoid hard-coded `input()`, globals, or direct module-level singletons in domain logic.
+
+### Testing & Design for Testability
+- Unit tests should target small, well-defined classes. Use mocks/fakes for injected dependencies (HTTP, DB, filesystem, network).
+- Avoid hard-coded globals or singleton state. Read configuration via injected providers or centralized config modules.
+- Prefer pure logic in domain classes; keep side effects in boundary/adapter classes.
+
+### Implementation Guidance
+- Transport: Encapsulate HTTP clients, retry, timeouts in a transport class.
+- Builders: Centralize string building and formatting (e.g., prompts) in dedicated builder classes.
+- Orchestrators: Coordinate workflows and model fallback in a client/service class; do not embed transport or formatting logic here.
+- Wrappers: Retain legacy free functions as thin wrappers that delegate to new classes, then remove once callers migrate.
+
+### Code Review Heuristics
+- Is each class name a clear noun and each method a clear verb phrase?
+- Can you explain the class’s single responsibility in one sentence?
+- Can dependencies be swapped in tests without patching globals?
+- Are new features implemented by adding classes/strategies rather than editing many existing files?
+
+### Self-Assessment Examples
+
+#### Example 1: Creating a New Class
+**Question:** "In what 5 ways might I be violating OOP and SOLID principles with this new DatabaseManager class?"
+**Analysis:**
+1. Does it have multiple responsibilities? (SRP violation)
+2. Am I hard-coding dependencies instead of injecting them? (DIP violation)
+3. Will changes to database logic require modifying this class? (OCP violation)
+4. Does it depend on concrete implementations rather than abstractions? (DIP violation)
+5. Am I forcing clients to depend on methods they don't use? (ISP violation)
+**Decision:** Address any "yes" answers before proceeding.
+
+#### Example 2: Modifying Existing Code
+**Question:** "In what 5 ways might I be violating OOP and SOLID principles by adding this method?"
+**Analysis:**
+1. Does this method belong in this class? (SRP - single responsibility)
+2. Am I modifying stable code instead of extending it? (OCP - open/closed)
+3. Will this break existing client code? (LSP - Liskov substitution)
+4. Am I adding dependencies clients don't need? (ISP - interface segregation)
+5. Am I introducing tight coupling to concrete classes? (DIP - dependency inversion)
+**Decision:** If any violations exist, redesign the approach.
+
+### Exceptions
+- Small, pure utility functions (e.g., trivial parsing) may remain as free functions if they have no side effects and improve readability. Do not mix them with I/O or orchestration.
+

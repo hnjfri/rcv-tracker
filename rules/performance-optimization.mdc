@@ -1,0 +1,201 @@
+---
+appliesTo: ["claude_word_qa/**/*.py"]
+priority: high
+context: ["performance", "optimization", "resources"]
+---
+
+# Performance Optimization Standards
+
+All code must be designed with performance and resource efficiency in mind, especially for document processing and ML operations.
+
+## MANDATORY CHECKPOINT: Before implementing performance-critical code
+
+### Performance Assessment Protocol (REQUIRED)
+**STOP and ask yourself:** "What are the potential performance bottlenecks in this implementation?"
+
+**Required Analysis - Check ALL 6 areas:**
+1. **Memory usage** - Will this load large datasets into memory unnecessarily?
+2. **I/O operations** - Are file/database operations optimized and batched?
+3. **CPU-intensive tasks** - Are expensive operations cached or lazily loaded?
+4. **Network calls** - Are API calls minimized and properly handled?
+5. **Resource cleanup** - Are connections, files, and memory properly released?
+6. **Scalability** - How will this perform with larger inputs?
+
+**Required Response:**
+- If ANY area shows significant bottlenecks → **OPTIMIZE BEFORE PROCEEDING**
+- If minor optimizations needed → **IMPLEMENT WITH PERFORMANCE NOTES**
+- If no bottlenecks identified → **PROCEED with implementation**
+
+### Verification Checkpoint
+After assessment, you must state:
+- "I have completed the mandatory performance assessment"
+- "I identified [major/minor/no] performance bottlenecks"
+- "Based on this assessment, I am [optimizing/proceeding with notes/proceeding]"
+
+## Core Performance Requirements
+
+### A. Lazy Loading for Heavy Dependencies
+**DO:**
+- Import ML libraries (torch, sentence_transformers) only when needed
+- Load models on first use, not at module import
+- Use conditional imports with fallback error handling
+- Cache loaded models in memory for reuse
+
+**DON'T:**
+- Import heavy libraries at module level
+- Load models multiple times
+- Import unused ML dependencies
+
+**Example:**
+```python
+# Good: Lazy loading
+def get_embedding_model():
+    if not hasattr(get_embedding_model, '_model'):
+        try:
+            from sentence_transformers import SentenceTransformer
+            get_embedding_model._model = SentenceTransformer('model-name')
+        except ImportError:
+            raise ImportError("sentence-transformers required for embeddings")
+    return get_embedding_model._model
+
+# Bad: Eager loading
+from sentence_transformers import SentenceTransformer  # Slow import
+model = SentenceTransformer('model-name')  # Slow initialization
+```
+
+### B. Database Connection Management
+**DO:**
+- Use connection pooling for multiple operations
+- Close connections explicitly in finally blocks
+- Use context managers for automatic cleanup
+- Batch database operations when possible
+
+**DON'T:**
+- Create new connections for each operation
+- Leave connections open indefinitely
+- Perform operations one-by-one when batching is possible
+
+### C. Memory-Efficient Data Processing
+**DO:**
+- Process documents in chunks rather than loading entirely
+- Use generators for large datasets
+- Release large objects explicitly when done
+- Monitor memory usage in long-running operations
+
+**DON'T:**
+- Load entire large documents into memory at once
+- Keep references to large objects longer than necessary
+- Process all data simultaneously without chunking
+
+### D. Async/Await for I/O Operations
+**DO:**
+- Use async patterns for file I/O when processing multiple documents
+- Make API calls asynchronous when possible
+- Use asyncio for concurrent operations
+- Implement proper error handling in async code
+
+**DON'T:**
+- Block on I/O operations in tight loops
+- Mix synchronous and asynchronous code carelessly
+- Ignore async context in error handling
+
+### E. Caching Strategies
+**DO:**
+- Cache expensive computations (embeddings, model outputs)
+- Use LRU cache for frequently accessed data
+- Implement cache invalidation strategies
+- Cache at appropriate granularity levels
+
+**DON'T:**
+- Recompute identical expensive operations
+- Cache everything without memory considerations
+- Ignore cache invalidation needs
+
+## Performance Monitoring Requirements
+
+### Measurement Points
+- Document processing time per file
+- Database query execution time
+- Model inference time
+- Memory usage during operations
+- API response times
+
+### Logging Performance Metrics
+```python
+import time
+import logging
+
+def log_performance(operation_name):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            result = func(*args, **kwargs)
+            duration = time.time() - start_time
+            logging.info(f"{operation_name} completed in {duration:.2f}s")
+            return result
+        return wrapper
+    return decorator
+```
+
+### Resource Cleanup Patterns
+```python
+# Database connections
+try:
+    with sqlite3.connect(db_path) as conn:
+        # operations
+        pass
+finally:
+    # explicit cleanup if needed
+    pass
+
+# File operations
+try:
+    with open(file_path, 'r') as f:
+        # operations
+        pass
+except Exception:
+    # error handling
+    raise
+```
+
+## Performance Anti-Patterns to Avoid
+
+### Memory Leaks
+- Circular references in object graphs
+- Unclosed file handles or database connections
+- Growing caches without bounds
+- Event listeners that are never removed
+
+### CPU Waste
+- Redundant computations in loops
+- Inefficient algorithms for large datasets
+- Synchronous operations that could be async
+- Unnecessary data serialization/deserialization
+
+### I/O Inefficiency
+- Multiple small database queries instead of batched queries
+- Reading files multiple times
+- Unnecessary network requests
+- Blocking I/O in performance-critical paths
+
+## Performance Testing Requirements
+
+### Benchmark Critical Operations
+- Document parsing speed
+- Embedding generation time
+- Database query performance
+- End-to-end processing time
+
+### Load Testing Scenarios
+- Processing multiple large documents
+- Concurrent user queries
+- Database operations under load
+- Memory usage over time
+
+### Performance Regression Prevention
+- Establish performance baselines
+- Monitor key metrics in CI/CD
+- Alert on significant performance degradation
+- Regular performance profiling
+
+This rule ensures the system remains responsive and efficient even when processing large document sets or handling multiple concurrent operations.

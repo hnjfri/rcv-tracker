@@ -1,0 +1,41 @@
+---
+alwaysApply: true
+priority: high
+---
+# Composition Root & Container Usage
+
+All application wiring must occur in a centralized composition root ("small app container"). This container constructs and provides shared infrastructure and domain collaborators (logger, configuration, database engine/session, repositories, services, filesystem, exporters) and passes them via constructor injection. This improves testability, consistency, and adherence to SOLID/DIP principles.
+
+## Mandate
+- Use a container as the single place to construct cross-cutting dependencies:
+  - Logger and configuration
+  - Database manager/engine/session factory
+  - Filesystem utilities and exporter factory
+  - Repositories and services
+- Orchestrators and CLI commands must obtain collaborators from the container (or be passed them by the caller), not construct them directly.
+- Use constructor injection everywhere; avoid global singletons and module-import side effects.
+
+## Allow
+- Direct instantiation is acceptable only for pure, leaf utilities with no I/O and no shared resources.
+- Backward compatible adapters may exist temporarily while migrating to container usage.
+
+## Trigger Criteria (use the container when any apply)
+- Wiring three or more collaborators for an operation.
+- Using shared infrastructure (logger, DB, filesystem) across modules.
+- Need to substitute/mocking collaborators in tests.
+
+## Prohibit
+- Instantiating infrastructure (database manager/engine, API clients, logger) inside business logic or orchestrators.
+- Reading environment/config directly in business logic; configuration access must be centralized.
+- Global/module-level singletons that hinder testability.
+
+## Verification Checkpoints
+- Orchestrators/CLI commands receive collaborators from the container only.
+- Tests can replace collaborators without patching globals or editing module state.
+- No new module-level side effects for infrastructure creation.
+
+## Implementation Notes
+- Keep the container small and side-effect free at import; lazily initialize resources when first requested.
+- Favor interfaces/protocols for repositories and services to preserve substitutability.
+- Retain factories (e.g., exporter factory) and have the container orchestrate them.
+
