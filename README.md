@@ -49,17 +49,17 @@ chmod +x rcv
 
 - `last_name`: Last name of the congress member
 - `state`: Two-letter state abbreviation (e.g., CA, NY, TX)
-- `congress_number`: One or more Congress numbers to search (e.g., 116 117 118 119)
+- `congress_number`: One or more Congress numbers to search (e.g., 118 119)
 
 ### Example
 
 ```bash
-./rcv Thompson CA 116 117 118 119
+./rcv Thompson CA 118 119
 ```
 
 This will:
 1. Search for all roll call votes by a member with last name "Thompson" from California (CA)
-2. Look through Congress sessions 116, 117, 118, and 119
+2. Look through Congress sessions 118 and 119
 3. Extract vote details including question and bill title
 4. Save results to `outputs/Thompson_YYYYMMDD.csv`
 
