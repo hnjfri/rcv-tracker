@@ -3,7 +3,6 @@ CSV export functionality for vote records.
 """
 
 import csv
-import os
 from pathlib import Path
 from typing import List
 from datetime import datetime
@@ -29,13 +28,16 @@ class CSVExporter:
         # Ensure output directory exists
         self.output_directory.mkdir(exist_ok=True)
     
-    def export_votes(self, vote_records: List[VoteRecord], member_last_name: str) -> str:
+    def export_votes(self, vote_records: List[VoteRecord], member_last_name: str,
+                     partial: bool = False) -> str:
         """
         Export vote records to CSV file.
         
         Args:
             vote_records: List of vote records to export
             member_last_name: Last name of the congress member (for filename)
+            partial: If True, the data is incomplete (failures or an early stop) and
+                the filename is suffixed with _PARTIAL so it is not mistaken for a full run
             
         Returns:
             Path to the created CSV file
@@ -51,7 +53,8 @@ class CSVExporter:
         
         # Generate filename with today's date
         today = datetime.now().strftime("%Y%m%d")
-        filename = f"{member_last_name}_{today}.csv"
+        suffix = "_PARTIAL" if partial else ""
+        filename = f"{member_last_name}_{today}{suffix}.csv"
         file_path = self.output_directory / filename
         
         self.logger.info(f"Exporting {len(vote_records)} vote records to {file_path}")

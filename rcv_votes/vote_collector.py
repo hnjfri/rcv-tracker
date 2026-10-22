@@ -3,62 +3,85 @@ Vote collector that orchestrates API calls and web scraping to gather complete v
 """
 
 import time
-import re
-from typing import List, Dict, Any, Generator, Set, Tuple
-from dataclasses import asdict
+from typing import List, Optional, Set, Tuple
 
-from .models import (VoteRecord, APIVoteData, MemberSearchCriteria,
-                     normalize_vote_cast, VOTE_NOT_ON_ROLL)
+from .models import (VoteRecord, RollCallData, MemberSearchCriteria, CollectionResult,
+                     VoteFailure, normalize_vote_cast, VOTE_NOT_ON_ROLL)
 from .congress_api import CongressAPIClient
 from .web_scraper import ClerkHouseGovScraper
-from .exceptions import APIError, ScrapingError, ValidationError
+from .vote_cache import VoteCache
+from .exceptions import APIError, RateLimitExceeded, ValidationError
 from .logging_config import get_logger, log_operation_start, log_operation_success, log_operation_error
+
+
+# Outcomes of collecting a single roll call
+_OK = "ok"
+_MISSING = "missing"
+_FAILED = "failed"
 
 
 class VoteCollector:
     """Collects and processes roll call votes for congress members."""
     
-    def __init__(self, api_client: CongressAPIClient, web_scraper: ClerkHouseGovScraper):
+    # When the vote list endpoint is unavailable, stop probing after this many
+    # consecutive missing or failed roll call numbers
+    MAX_CONSECUTIVE_PROBE_MISSES = 5
+    
+    def __init__(self, api_client: CongressAPIClient, web_scraper: ClerkHouseGovScraper,
+                 cache: Optional[VoteCache] = None):
         """
         Initialize the vote collector.
         
         Args:
             api_client: Congress.gov API client
             web_scraper: Web scraper for clerk.house.gov
+            cache: Optional on-disk cache of roll call data
         """
         self.api_client = api_client
         self.web_scraper = web_scraper
+        self.cache = cache
         self.logger = get_logger('vote_collector')
+        self._reset_run_state()
     
-    def collect_member_votes(self, search_criteria: MemberSearchCriteria, 
-                           correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
+    def _reset_run_state(self) -> None:
+        """Reset per-run counters and failure tracking."""
+        self._failures: List[VoteFailure] = []
+        self._cache_hits = 0
+        self._api_calls = 0
+    
+    def collect_member_votes(self, search_criteria: MemberSearchCriteria,
+                             correlation_id: str) -> CollectionResult:
         """
         Collect every House roll call vote in the specified congresses, recording the
         target member's vote (Yea, Nay, Present, Not Voting, or Not on Roll) for each.
         
+        Individual roll calls that fail are recorded and skipped rather than aborting the
+        run. If the API rate limit is exhausted, collection stops and everything gathered
+        so far is returned; completed roll calls are cached, so re-running resumes cheaply.
+        
         Args:
             search_criteria: Member search criteria (name, state, district, congress numbers)
             correlation_id: Unique ID for tracking this operation
-            max_votes: Maximum number of votes to collect (for testing)
             
         Returns:
-            List of vote records, one per roll call vote, in chronological order.
-            Empty if the member never appears on any roll call.
+            Collection result with one vote record per roll call (chronological), any
+            failures, cache/API call counts, and the reason for stopping early if any.
+            Records are empty if the member never appears on any roll call.
         """
         operation = f"collect_votes_{search_criteria.last_name}_{search_criteria.state}"
         log_operation_start(self.logger, operation, correlation_id, 
                           member=search_criteria.last_name,
                           state=search_criteria.state,
+                          district=search_criteria.district,
                           congresses=search_criteria.congress_numbers)
         
         start_time = time.time()
-        all_votes = []
+        self._reset_run_state()
+        records: List[VoteRecord] = []
+        aborted_reason: Optional[str] = None
         
         try:
             for congress in search_criteria.congress_numbers:
-                if max_votes and len(all_votes) >= max_votes:
-                    break
-                    
                 self.logger.info(f"Processing Congress {congress} for {search_criteria.last_name} "
                                  f"({search_criteria.state}-{search_criteria.district})")
                 
@@ -73,212 +96,225 @@ class VoteCollector:
                     )
                     continue
                 
-                congress_votes = self._collect_congress_votes(
-                    congress, set(bioguide_ids), correlation_id, max_votes - len(all_votes) if max_votes else None
-                )
-                
-                all_votes.extend(congress_votes)
-                
-                self.logger.info(f"Found {len(congress_votes)} votes for Congress {congress}")
-                
-                if max_votes and len(all_votes) >= max_votes:
-                    all_votes = all_votes[:max_votes]
-                    self.logger.info(f"Reached maximum vote limit of {max_votes}, stopping collection")
-                    break
-            
-            # If the member never appears on any roll call, the name/state/district/congress
-            # inputs are almost certainly wrong; return nothing rather than a file
-            # full of "Not on Roll" rows.
-            if all_votes and all(v.vote_cast == VOTE_NOT_ON_ROLL for v in all_votes):
-                self.logger.warning(
-                    f"{search_criteria.last_name} ({search_criteria.state}-{search_criteria.district}) does not appear "
-                    f"on any of the {len(all_votes)} roll calls collected"
-                )
-                all_votes = []
-            
-            duration = time.time() - start_time
-            log_operation_success(self.logger, operation, correlation_id, duration,
-                                total_votes=len(all_votes),
-                                congresses_processed=len(search_criteria.congress_numbers))
-            
-            return all_votes
-            
+                before = len(records)
+                self._collect_congress_votes(congress, set(bioguide_ids), records)
+                self.logger.info(f"Collected {len(records) - before} roll calls for Congress {congress}")
+        
+        except RateLimitExceeded as e:
+            aborted_reason = (f"API rate limit reached; collection stopped early. "
+                              f"Re-run the same command later to resume from the cache. ({e})")
+            self.logger.error(aborted_reason)
+        
         except Exception as e:
-            duration = time.time() - start_time
             log_operation_error(self.logger, operation, correlation_id, e,
-                              votes_collected=len(all_votes))
+                              votes_collected=len(records))
             raise
+        
+        # If the member never appears on any roll call, the name/state/district/congress
+        # inputs are almost certainly wrong; return nothing rather than a file
+        # full of "Not on Roll" rows.
+        if records and all(v.vote_cast == VOTE_NOT_ON_ROLL for v in records):
+            self.logger.warning(
+                f"{search_criteria.last_name} ({search_criteria.state}-{search_criteria.district}) "
+                f"does not appear on any of the {len(records)} roll calls collected"
+            )
+            records = []
+        
+        duration = time.time() - start_time
+        log_operation_success(self.logger, operation, correlation_id, duration,
+                            total_votes=len(records),
+                            failures=len(self._failures),
+                            cache_hits=self._cache_hits,
+                            api_calls=self._api_calls,
+                            congresses_processed=len(search_criteria.congress_numbers))
+        
+        return CollectionResult(
+            records=records,
+            failures=list(self._failures),
+            cache_hits=self._cache_hits,
+            api_calls=self._api_calls,
+            aborted_reason=aborted_reason
+        )
     
-    def _collect_congress_votes(self, congress: int, bioguide_ids: Set[str], 
-                               correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
+    def _collect_congress_votes(self, congress: int, bioguide_ids: Set[str],
+                                records: List[VoteRecord]) -> None:
         """
-        Collect all roll call votes in a specific congress, with the member's vote on each.
+        Collect all roll call votes in a specific congress, appending to records.
         
         Args:
             congress: Congress number
             bioguide_ids: Bioguide ID(s) identifying the target member
-            correlation_id: Operation tracking ID
-            max_votes: Maximum number of votes to collect
-            
-        Returns:
-            List of vote records for the congress
+            records: List to append vote records to (so partial progress survives an abort)
         """
-        congress_votes = []
-        
         # Iterate through sessions (typically 1 and 2)
         for session in [1, 2]:
-            if max_votes and len(congress_votes) >= max_votes:
-                break
-                
             self.logger.debug(f"Processing Congress {congress}, Session {session}")
             
-            session_votes = self._collect_session_votes(
-                congress, session, bioguide_ids, correlation_id, max_votes - len(congress_votes) if max_votes else None
-            )
+            before = len(records)
+            self._collect_session_votes(congress, session, bioguide_ids, records)
             
-            congress_votes.extend(session_votes)
-            
-            if session_votes:
-                self.logger.debug(f"Found {len(session_votes)} votes in Congress {congress}, Session {session}")
-        
-        return congress_votes
+            if len(records) > before:
+                self.logger.debug(f"Found {len(records) - before} votes in Congress {congress}, Session {session}")
     
-    def _collect_session_votes(self, congress: int, session: int, bioguide_ids: Set[str], 
-                              correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
+    def _collect_session_votes(self, congress: int, session: int, bioguide_ids: Set[str],
+                               records: List[VoteRecord]) -> None:
         """
-        Collect all roll call votes in a specific congress session, with the member's vote on each.
+        Collect all roll call votes in a specific congress session, appending to records.
+        
+        Uses the API's vote list to know exactly which roll calls exist. If the list
+        cannot be used, falls back to probing roll call numbers from 1 until several
+        consecutive numbers are missing.
         
         Args:
             congress: Congress number
             session: Session number (1 or 2)
             bioguide_ids: Bioguide ID(s) identifying the target member
-            correlation_id: Operation tracking ID
-            max_votes: Maximum number of votes to collect
-            
-        Returns:
-            List of vote records for the session
+            records: List to append vote records to
         """
-        session_votes = []
-        vote_number = 1
-        consecutive_failures = 0
-        max_consecutive_failures = 5  # Stop after 5 consecutive 404s
+        numbers = self._get_roll_call_numbers(congress, session)
         
-        while consecutive_failures < max_consecutive_failures:
-            if max_votes and len(session_votes) >= max_votes:
-                self.logger.debug(f"Reached maximum vote limit of {max_votes} for session")
-                break
-                
-            try:
-                # Get vote data from API
-                api_vote_data = self.api_client.get_house_vote_members(congress, session, vote_number)
-                
-                if not api_vote_data:
-                    # Roll call exists but has no member results; nothing to record
-                    self.logger.warning(f"Vote {vote_number}: API returned no member results, skipping")
-                    consecutive_failures = 0
-                    vote_number += 1
-                    continue
-                
-                # Roll call metadata is identical on every member entry
-                roll_call_info = api_vote_data[0]
-                
-                # Find the target member's vote (None if member is not on this roll call)
-                member_vote = self._find_member_vote(api_vote_data, bioguide_ids)
-                
-                # Every roll call produces a record, including ones the member missed
-                if member_vote:
-                    vote_cast = normalize_vote_cast(member_vote.vote_cast)
-                else:
-                    vote_cast = VOTE_NOT_ON_ROLL
-                
-                # Get additional details from web scraping (always returns valid data, even if empty)
-                scraped_details = self.web_scraper.extract_vote_details(roll_call_info.source_data_url)
-                
-                # Use scraped question if available, otherwise fall back to API question
-                question = scraped_details.question if scraped_details.question else roll_call_info.vote_question
-                
-                # Use scraped date if available, otherwise extract from start_date
-                date = scraped_details.date
-                if date == "1900-01-01":  # Fallback date was used
-                    # Try to extract date from API start_date (e.g., "2023-01-03T12:28:00-05:00")
-                    try:
-                        api_date = roll_call_info.start_date.split('T')[0]  # Get YYYY-MM-DD part
-                        if re.match(r'^\d{4}-\d{2}-\d{2}$', api_date):
-                            date = api_date
-                    except Exception:
-                        pass  # Keep fallback date
-                
-                # Generate roll call vote URL from source data URL
-                roll_call_vote_url = self._generate_roll_call_url(roll_call_info.source_data_url)
-                
-                # Create complete vote record (with empty strings for missing data)
-                vote_record = VoteRecord(
-                    congress=roll_call_info.congress,
-                    date=date,
-                    roll_call_number=roll_call_info.roll_call_number,
-                    legislation=roll_call_info.legislation,
-                    vote_cast=vote_cast,
-                    question=question,
-                    bill_title=scraped_details.bill_title,
-                    roll_call_vote_url=roll_call_vote_url
-                )
-                
-                session_votes.append(vote_record)
-                
-                self.logger.debug(f"Collected vote {vote_number}: {roll_call_info.legislation} - {vote_cast}")
-                
-                # Log if we had to use fallback data
-                if not scraped_details.question and not scraped_details.bill_title:
-                    self.logger.debug(f"Vote {vote_number}: Used API data only (scraping found no additional details)")
-                elif not scraped_details.question or not scraped_details.bill_title:
-                    self.logger.debug(f"Vote {vote_number}: Partial scraping success")
-                
-                # Reset failure counter on successful API call
-                consecutive_failures = 0
-                vote_number += 1
-                
-                # Small delay to be respectful to the API
-                time.sleep(0.1)
-                
-            except APIError as e:
-                if e.status_code == 404:
-                    # Vote not found - this is expected when we reach the end
-                    consecutive_failures += 1
-                    vote_number += 1
-                    
-                    if consecutive_failures >= max_consecutive_failures:
-                        self.logger.debug(f"Reached end of votes for Congress {congress}, Session {session} "
-                                        f"(vote {vote_number - max_consecutive_failures})")
-                        break
-                else:
-                    # Other API errors should be logged and may indicate a real problem
-                    self.logger.error(f"API error for Congress {congress}, Session {session}, Vote {vote_number}: {e}")
-                    consecutive_failures += 1
-                    vote_number += 1
-                    
-                    if consecutive_failures >= max_consecutive_failures:
-                        self.logger.warning(f"Too many consecutive API errors, stopping session {session}")
-                        break
+        if numbers is not None:
+            self.logger.debug(f"Congress {congress}, Session {session}: {len(numbers)} roll calls listed")
+            for number in numbers:
+                self._collect_roll_call(congress, session, number, bioguide_ids, records, expect_exists=True)
+            return
         
-        return session_votes
+        # Fallback: probe sequentially until the end of the session
+        self.logger.warning(f"Falling back to probing roll call numbers for Congress {congress}, Session {session}")
+        number = 1
+        misses = 0
+        while misses < self.MAX_CONSECUTIVE_PROBE_MISSES:
+            outcome = self._collect_roll_call(congress, session, number, bioguide_ids, records, expect_exists=False)
+            misses = misses + 1 if outcome in (_MISSING, _FAILED) else 0
+            number += 1
     
-    def _find_member_vote(self, api_vote_data: List[APIVoteData],
-                         bioguide_ids: Set[str]) -> APIVoteData:
+    def _get_roll_call_numbers(self, congress: int, session: int) -> Optional[List[int]]:
         """
-        Find the target member's vote in the API response data.
+        Get the roll call numbers in a session from the API's vote list.
+        
+        Returns:
+            Roll call numbers, or None if the list is unavailable (caller should probe)
+            
+        Raises:
+            RateLimitExceeded: If the API rate limit is exhausted
+        """
+        try:
+            self._api_calls += 1
+            return self.api_client.list_house_vote_numbers(congress, session)
+        except RateLimitExceeded:
+            raise
+        except APIError as e:
+            self.logger.warning(f"Could not list votes for Congress {congress}, Session {session}: {e}")
+            return None
+    
+    def _collect_roll_call(self, congress: int, session: int, number: int, bioguide_ids: Set[str],
+                           records: List[VoteRecord], expect_exists: bool) -> str:
+        """
+        Collect a single roll call and append its record.
+        
+        Any failure other than hitting the rate limit is recorded and does not stop the run.
         
         Args:
-            api_vote_data: List of all member votes from API
-            bioguide_ids: Bioguide ID(s) of the target member
-            
+            congress: Congress number
+            session: Session number
+            number: Roll call number
+            bioguide_ids: Bioguide ID(s) identifying the target member
+            records: List to append the vote record to
+            expect_exists: True if the roll call is known to exist, so a 404 is a failure
+                rather than the end of the session
+                
         Returns:
-            The target member's vote data, or None if not found
+            _OK, _MISSING (not found while probing), or _FAILED
+            
+        Raises:
+            RateLimitExceeded: If the API rate limit is exhausted
         """
-        for vote_data in api_vote_data:
-            if vote_data.bio_guide_id in bioguide_ids:
-                return vote_data
+        try:
+            roll_call, scraped = self._load_roll_call(congress, session, number)
+            
+            # The target member's raw vote; absent if they were not on this roll call
+            raw_vote = next((roll_call.votes[b] for b in bioguide_ids if b in roll_call.votes), None)
+            vote_cast = normalize_vote_cast(raw_vote) if raw_vote is not None else VOTE_NOT_ON_ROLL
+            
+            # Prefer the scraped question, otherwise the API's
+            question = scraped.get('question') or roll_call.vote_question
+            
+            # Date comes from the API start date (e.g., "2023-01-03T12:28:00-05:00")
+            date = roll_call.start_date.split('T')[0]
+            
+            record = VoteRecord(
+                congress=roll_call.congress,
+                date=date,
+                roll_call_number=roll_call.roll_call_number,
+                legislation=roll_call.legislation,
+                vote_cast=vote_cast,
+                question=question,
+                bill_title=scraped.get('bill_title', ''),
+                roll_call_vote_url=self._generate_roll_call_url(roll_call.source_data_url)
+            )
+            records.append(record)
+            
+            self.logger.debug(f"Collected vote {number}: {roll_call.legislation} - {vote_cast}")
+            return _OK
         
-        return None
+        except RateLimitExceeded:
+            raise
+        
+        except APIError as e:
+            if e.status_code == 404 and not expect_exists:
+                self.logger.debug(f"Vote {number} not found (Congress {congress}, Session {session})")
+                return _MISSING
+            self._record_failure(congress, session, number, str(e))
+            return _FAILED
+        
+        except Exception as e:
+            # Unexpected problems with one roll call should not discard the rest of the run
+            self._record_failure(congress, session, number, f"{type(e).__name__}: {e}")
+            return _FAILED
+    
+    def _record_failure(self, congress: int, session: int, number: int, reason: str) -> None:
+        """Log and remember a roll call that could not be collected."""
+        self.logger.error(f"Failed to collect Congress {congress}, Session {session}, Vote {number}: {reason}")
+        self._failures.append(VoteFailure(congress, session, number, reason))
+    
+    def _load_roll_call(self, congress: int, session: int, number: int) -> Tuple[RollCallData, dict]:
+        """
+        Get a roll call's data and scraped details, using the cache where possible.
+        
+        Returns:
+            Tuple of (roll call data, scraped details dict with 'question' and 'bill_title')
+        """
+        entry = self.cache.get(congress, session, number) if self.cache else None
+        roll_call: Optional[RollCallData] = None
+        
+        if entry is not None:
+            try:
+                roll_call = RollCallData.from_dict(entry)
+                self._cache_hits += 1
+            except (KeyError, TypeError, ValueError) as e:
+                self.logger.warning(f"Ignoring malformed cache entry for vote {number}: {e}")
+                entry = None
+        
+        if roll_call is None:
+            self._api_calls += 1
+            roll_call = self.api_client.get_roll_call(congress, session, number)
+            entry = roll_call.to_dict()
+            if self.cache:
+                self.cache.put(congress, session, number, entry)
+        
+        scraped = entry.get('scraped')
+        if not isinstance(scraped, dict):
+            details = self.web_scraper.extract_vote_details(roll_call.source_data_url)
+            scraped = {'question': details.question, 'bill_title': details.bill_title}
+            
+            # Only cache successful scrapes so failed ones are retried on the next run
+            if details.question and self.cache:
+                entry['scraped'] = scraped
+                self.cache.put(congress, session, number, entry)
+            elif not details.question:
+                self.logger.debug(f"Vote {number}: Used API data only (scraping found no details)")
+        
+        return roll_call, scraped
     
     def _generate_roll_call_url(self, source_data_url: str) -> str:
         """
@@ -292,24 +328,9 @@ class VoteCollector:
             source_data_url: Source data URL from API
             
         Returns:
-            Generated roll call vote URL
+            Generated roll call vote URL, or the source URL if it is not in the expected format
         """
         try:
-            # Extract year and roll call number from URL
-            # Expected format: https://clerk.house.gov/evs/YYYY/rollXXX.xml
-            pattern = r'https://clerk\.house\.gov/evs/(\d{4})/roll(\d+)\.xml'
-            match = re.search(pattern, source_data_url)
-            
-            if match:
-                year = match.group(1)
-                roll_number = match.group(2).zfill(3)  # Ensure 3 digits with leading zeros
-                
-                # Generate RCV URL: https://clerk.house.gov/Votes/{year}{rollNumber}
-                return f"https://clerk.house.gov/Votes/{year}{roll_number}"
-            else:
-                # Fallback: return the source URL if pattern doesn't match
-                return source_data_url
-                
-        except Exception as e:
-            self.logger.warning(f"Failed to generate roll call URL from {source_data_url}: {e}")
+            return self.web_scraper.generate_rcv_url(source_data_url)
+        except ValidationError:
             return source_data_url

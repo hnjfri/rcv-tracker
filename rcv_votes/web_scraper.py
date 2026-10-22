@@ -4,12 +4,9 @@ Web scraper for extracting vote details from clerk.house.gov.
 
 import requests
 import re
-from typing import Optional
-from urllib.parse import urljoin
-from datetime import datetime
 
 from .models import ScrapedVoteDetails
-from .exceptions import ScrapingError, ValidationError
+from .exceptions import ValidationError
 from .logging_config import get_logger
 
 
@@ -39,15 +36,14 @@ class ClerkHouseGovScraper:
             source_data_url: URL from Congress API (e.g., https://clerk.house.gov/evs/2025/roll055.xml)
             
         Returns:
-            Scraped vote details including question, bill title, and date (empty strings if not found)
+            Scraped vote details including question and bill title (empty strings if not found)
         """
         question = ""
         bill_title = ""
-        date = ""
         
         try:
             # Generate the RCV URL from source data URL
-            rcv_url = self._generate_rcv_url(source_data_url)
+            rcv_url = self.generate_rcv_url(source_data_url)
             
             self.logger.debug(f"Scraping vote details from: {rcv_url}")
             
@@ -58,9 +54,8 @@ class ClerkHouseGovScraper:
             # Extract vote details from HTML (returns empty strings if not found)
             question = self._extract_question(response.text)
             bill_title = self._extract_bill_title(response.text)
-            date = self._extract_date(response.text)
             
-            self.logger.debug(f"Extracted vote details - Question: '{question[:30]}...', Title: '{bill_title[:30]}...', Date: '{date}'")
+            self.logger.debug(f"Extracted vote details - Question: '{question[:30]}...', Title: '{bill_title[:30]}...'")
             
         except requests.exceptions.RequestException as e:
             self.logger.warning(f"Failed to fetch vote details from {source_data_url}: {e}")
@@ -68,17 +63,12 @@ class ClerkHouseGovScraper:
             self.logger.warning(f"Error while scraping vote details from {source_data_url}: {e}")
         
         # Always return a ScrapedVoteDetails object, even with empty fields
-        # Use a fallback date if none found
-        if not date:
-            date = "1900-01-01"  # Placeholder date for sorting purposes
-        
         return ScrapedVoteDetails(
             question=question or "",
-            bill_title=bill_title or "",
-            date=date
+            bill_title=bill_title or ""
         )
     
-    def _generate_rcv_url(self, source_data_url: str) -> str:
+    def generate_rcv_url(self, source_data_url: str) -> str:
         """
         Generate RCV URL from source data URL.
         
@@ -169,73 +159,6 @@ class ClerkHouseGovScraper:
                     return bill_title
         
         # If no bill title found, return empty string
-        return ""
-    
-    def _extract_date(self, html_content: str) -> str:
-        """
-        Extract and format the vote date from HTML content.
-        
-        Expected format in HTML: "3-Mar-2025"
-        Output format: "2025-03-03" (YYYY-MM-DD)
-        
-        Args:
-            html_content: Raw HTML content from the page
-            
-        Returns:
-            Formatted date string in YYYY-MM-DD format, or empty string if not found
-        """
-        # Try multiple date patterns
-        date_patterns = [
-            r'(\d{1,2})-([A-Za-z]{3})-(\d{4})',  # 3-Mar-2025
-            r'(\d{1,2})/(\d{1,2})/(\d{4})',      # 3/15/2025
-            r'(\d{4})-(\d{1,2})-(\d{1,2})',      # 2025-03-15
-        ]
-        
-        for i, pattern in enumerate(date_patterns):
-            match = re.search(pattern, html_content)
-            if match:
-                try:
-                    if i == 0:  # DD-MMM-YYYY format
-                        day = match.group(1).zfill(2)
-                        month_abbr = match.group(2)
-                        year = match.group(3)
-                        
-                        # Convert month abbreviation to number
-                        month_map = {
-                            'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
-                            'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
-                            'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
-                        }
-                        
-                        month_num = month_map.get(month_abbr.lower())
-                        if month_num:
-                            formatted_date = f"{year}-{month_num}-{day}"
-                            # Validate the date
-                            datetime.strptime(formatted_date, '%Y-%m-%d')
-                            return formatted_date
-                    
-                    elif i == 1:  # MM/DD/YYYY format
-                        month = match.group(1).zfill(2)
-                        day = match.group(2).zfill(2)
-                        year = match.group(3)
-                        formatted_date = f"{year}-{month}-{day}"
-                        # Validate the date
-                        datetime.strptime(formatted_date, '%Y-%m-%d')
-                        return formatted_date
-                    
-                    elif i == 2:  # YYYY-MM-DD format (already correct)
-                        year = match.group(1)
-                        month = match.group(2).zfill(2)
-                        day = match.group(3).zfill(2)
-                        formatted_date = f"{year}-{month}-{day}"
-                        # Validate the date
-                        datetime.strptime(formatted_date, '%Y-%m-%d')
-                        return formatted_date
-                        
-                except (ValueError, KeyError):
-                    continue
-        
-        # If no valid date found, return empty string
         return ""
     
     def __enter__(self):

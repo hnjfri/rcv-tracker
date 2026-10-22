@@ -41,6 +41,22 @@ def print_usage():
     print("Environment:")
     print("  CONGRESS_API_KEY  Required. Get from https://api.congress.gov/sign-up/")
     print("  JSON_LOGS         Optional. Set to 'true' for JSON log format")
+    print("  RCV_REFRESH       Optional. Set to 'true' to ignore cached roll calls and refetch")
+
+
+def print_problems(result) -> None:
+    """Print any roll calls that failed and any early stop, so incomplete data is obvious."""
+    if result.aborted_reason:
+        print(f"[WARNING] {result.aborted_reason}")
+    
+    if result.failures:
+        print(f"[WARNING] {len(result.failures)} roll calls could not be collected and are missing from the output:")
+        for failure in result.failures[:20]:
+            print(f"  Congress {failure.congress}, session {failure.session}, "
+                  f"roll call {failure.roll_call_number}: {failure.reason}")
+        if len(result.failures) > 20:
+            print(f"  ... and {len(result.failures) - 20} more (see logs)")
+        print("Re-run the same command to retry them; completed roll calls are cached.")
 
 
 def parse_arguments(args: list) -> MemberSearchCriteria:
@@ -108,10 +124,12 @@ def main():
     # Check for JSON logs environment variable
     json_logs = os.getenv('JSON_LOGS', '').lower() == 'true'
     verbose = os.getenv('VERBOSE', '').lower() == 'true'
+    refresh_cache = os.getenv('RCV_REFRESH', '').lower() == 'true'
     
     # Initialize application container
     try:
-        with ApplicationContainer(verbose=verbose, json_logs=json_logs) as container:
+        with ApplicationContainer(verbose=verbose, json_logs=json_logs,
+                              refresh_cache=refresh_cache) as container:
             # Validate configuration before proceeding
             container.validate_configuration()
             
@@ -137,9 +155,10 @@ def main():
             try:
                 # Collect every roll call vote in the requested congresses, with the
                 # member's vote (including missed votes) on each
-                vote_records = container.vote_collector.collect_member_votes(
+                result = container.vote_collector.collect_member_votes(
                     search_criteria, correlation_id
                 )
+                vote_records = result.records
                 
                 if not vote_records:
                     print(f"[WARNING] No votes found for {search_criteria.last_name} ({search_criteria.state}-{search_criteria.district})")
@@ -147,18 +166,22 @@ def main():
                     print("- The member name, state, or district is incorrect")
                     print("- The member did not serve in the specified congress sessions")
                     print("- No roll call votes were found for the specified congress sessions")
+                    print_problems(result)
                     sys.exit(0)
                 
-                # Export to CSV
+                # Export to CSV (flagged as partial if anything was missed)
                 csv_file_path = container.csv_exporter.export_votes(
-                    vote_records, search_criteria.last_name
+                    vote_records, search_criteria.last_name, partial=not result.complete
                 )
                 
                 # Success message
                 duration = time.time() - start_time
                 missed = sum(1 for r in vote_records if r.missed_vote)
-                print(f"[SUCCESS] Collected {len(vote_records)} roll calls in {duration:.1f} seconds")
+                status = "SUCCESS" if result.complete else "WARNING"
+                print(f"[{status}] Collected {len(vote_records)} roll calls in {duration:.1f} seconds")
+                print(f"Source: {result.cache_hits} from cache, {result.api_calls} API requests")
                 print(f"Missed votes (Not Voting): {missed}")
+                print_problems(result)
                 print(f"Results saved to: {csv_file_path}")
                 
                 # Log successful completion

@@ -3,8 +3,8 @@ Data models for RCV Votes application.
 """
 
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from dataclasses import field
+from typing import Optional, List, Dict
 import re
 
 from .exceptions import ValidationError
@@ -100,27 +100,17 @@ class VoteRecord:
 
 
 @dataclass
-class APIVoteData:
-    """Raw vote data from Congress.gov API."""
+class RollCallData:
+    """One House roll call vote from the Congress.gov API, with every member's raw vote."""
     congress: int
-    identifier: int
-    legislation_number: str
-    legislation_type: str
-    legislation_url: str
-    bio_guide_id: str
-    first_name: str
-    last_name: str
-    vote_cast: str
-    vote_party: str
-    vote_state: str
-    result: str
-    roll_call_number: int
     session_number: int
+    roll_call_number: int
+    legislation_type: str
+    legislation_number: str
     source_data_url: str
     start_date: str
-    update_date: str
     vote_question: str
-    vote_type: str
+    votes: Dict[str, str] = field(default_factory=dict)  # Bioguide ID -> raw voteCast
     
     @property
     def legislation(self) -> str:
@@ -129,10 +119,48 @@ class APIVoteData:
             return f"{self.legislation_type}{self.legislation_number}"
         return "Non-Legislative"
     
-    def validate_for_member(self, target_last_name: str, target_state: str) -> bool:
-        """Check if this vote record matches the target member."""
-        return (self.last_name.lower() == target_last_name.lower() and 
-                self.vote_state.upper() == target_state.upper())
+    def to_dict(self) -> Dict:
+        """Serialize for the on-disk cache."""
+        return {
+            "schema": 1,
+            "meta": {
+                "congress": self.congress,
+                "session_number": self.session_number,
+                "roll_call_number": self.roll_call_number,
+                "legislation_type": self.legislation_type,
+                "legislation_number": self.legislation_number,
+                "source_data_url": self.source_data_url,
+                "start_date": self.start_date,
+                "vote_question": self.vote_question,
+            },
+            "votes": dict(self.votes),
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> "RollCallData":
+        """
+        Rebuild from a cached dictionary.
+        
+        Raises:
+            KeyError, TypeError, ValueError: If the cached data is malformed
+        """
+        if data.get("schema") != 1:
+            raise ValueError("Unsupported cache schema")
+        meta = data["meta"]
+        votes = data["votes"]
+        if not isinstance(votes, dict):
+            raise TypeError("Cached votes must be a dictionary")
+        return cls(
+            congress=int(meta["congress"]),
+            session_number=int(meta["session_number"]),
+            roll_call_number=int(meta["roll_call_number"]),
+            legislation_type=str(meta["legislation_type"]),
+            legislation_number=str(meta["legislation_number"]),
+            source_data_url=str(meta["source_data_url"]),
+            start_date=str(meta["start_date"]),
+            vote_question=str(meta["vote_question"]),
+            votes={str(k): str(v) for k, v in votes.items()},
+        )
 
 
 @dataclass
@@ -140,7 +168,6 @@ class ScrapedVoteDetails:
     """Vote details scraped from clerk.house.gov."""
     question: str
     bill_title: str
-    date: str  # YYYY-MM-DD format
     
     def __post_init__(self):
         """Validate scraped data."""
@@ -149,9 +176,30 @@ class ScrapedVoteDetails:
         
         if not isinstance(self.bill_title, str):
             raise ValidationError("Bill title must be a string", "bill_title", self.bill_title)
-        
-        if not re.match(r'^\d{4}-\d{2}-\d{2}$', self.date):
-            raise ValidationError("Date must be in YYYY-MM-DD format", "date", self.date)
+
+
+@dataclass
+class VoteFailure:
+    """A roll call that could not be collected."""
+    congress: int
+    session: int
+    roll_call_number: int
+    reason: str
+
+
+@dataclass
+class CollectionResult:
+    """Outcome of a collection run, including anything that went wrong along the way."""
+    records: List[VoteRecord]
+    failures: List[VoteFailure] = field(default_factory=list)
+    cache_hits: int = 0
+    api_calls: int = 0
+    aborted_reason: Optional[str] = None  # Set if the run stopped early (e.g., rate limit)
+    
+    @property
+    def complete(self) -> bool:
+        """True if every roll call was collected."""
+        return not self.failures and not self.aborted_reason
 
 
 @dataclass

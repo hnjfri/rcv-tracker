@@ -9,6 +9,7 @@ from typing import Optional
 from .congress_api import CongressAPIClient
 from .web_scraper import ClerkHouseGovScraper
 from .vote_collector import VoteCollector
+from .vote_cache import VoteCache
 from .csv_exporter import CSVExporter
 from .logging_config import configure_logging, get_logger
 from .exceptions import ConfigurationError
@@ -23,7 +24,8 @@ class ApplicationContainer:
     """
     
     def __init__(self, api_key: Optional[str] = None, verbose: bool = False, 
-                 json_logs: bool = False, output_directory: str = "outputs"):
+                 json_logs: bool = False, output_directory: str = "outputs",
+                 cache_directory: str = "cache", refresh_cache: bool = False):
         """
         Initialize the application container.
         
@@ -32,11 +34,15 @@ class ApplicationContainer:
             verbose: Enable debug logging
             json_logs: Use JSON log format
             output_directory: Directory for CSV output files
+            cache_directory: Directory for cached roll call data
+            refresh_cache: If True, ignore cached roll calls and fetch them again
         """
         self._api_key = api_key
         self._verbose = verbose
         self._json_logs = json_logs
         self._output_directory = output_directory
+        self._cache_directory = cache_directory
+        self._refresh_cache = refresh_cache
         
         # Lazy-initialized components
         self._logger = None
@@ -44,6 +50,7 @@ class ApplicationContainer:
         self._web_scraper = None
         self._vote_collector = None
         self._csv_exporter = None
+        self._vote_cache = None
         self._correlation_id = None
     
     @property
@@ -76,12 +83,20 @@ class ApplicationContainer:
         return self._web_scraper
     
     @property
+    def vote_cache(self) -> VoteCache:
+        """Get the on-disk roll call cache."""
+        if self._vote_cache is None:
+            self._vote_cache = VoteCache(self._cache_directory, refresh=self._refresh_cache)
+        return self._vote_cache
+    
+    @property
     def vote_collector(self) -> VoteCollector:
         """Get vote collector service."""
         if self._vote_collector is None:
             self._vote_collector = VoteCollector(
                 api_client=self.api_client,
-                web_scraper=self.web_scraper
+                web_scraper=self.web_scraper,
+                cache=self.vote_cache
             )
         return self._vote_collector
     

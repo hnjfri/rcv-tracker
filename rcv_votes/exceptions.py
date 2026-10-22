@@ -19,6 +19,11 @@ class APIError(RCVError):
         self.response_data = response_data
 
 
+class RateLimitExceeded(APIError):
+    """Raised when the API rate limit is still hit after all retries."""
+    pass
+
+
 class ValidationError(RCVError):
     """Raised when data validation fails."""
     

@@ -9,6 +9,8 @@ A Python application that uses the Congress.gov API to pull every House roll cal
 - Flags missed votes in a dedicated column so they can be filtered in a spreadsheet
 - Scrapes additional vote details from clerk.house.gov
 - Supports multiple Congress sessions in a single run
+- Caches roll call data on disk so reruns and additional legislators avoid repeat API requests
+- Keeps going when individual roll calls fail, and reports exactly what is missing
 - Exports results to CSV format with proper date formatting
 - Comprehensive error handling and logging
 - Follows SOLID principles and dependency injection patterns
@@ -68,6 +70,12 @@ This will:
 
 ## Recent Updates
 
+- Roll call data is now cached in `cache/` (one small JSON file per roll call). The cache is not tied to a legislator, so running a second member for the same congress makes almost no API requests, and a run that is interrupted resumes where it left off. Delete `cache/` or set `RCV_REFRESH=true` to refetch.
+- The roll calls in each session are now taken from the API's vote list instead of probing numbers until requests fail. If the list is unavailable the program falls back to probing.
+- A roll call that fails (bad response, server error) no longer aborts the run. Failures are listed at the end and the CSV is saved with a `_PARTIAL` suffix. If the API rate limit is reached, collection stops, everything gathered is saved as `_PARTIAL`, and re-running the same command finishes the rest from the cache.
+- The vote date now comes from the API rather than the scraped page. The clerk page is only used for the question and bill title.
+- The run summary shows how many roll calls came from the cache and how many API requests were made.
+- Removed unused code: unused API fields and imports, the unused `config_template.py`, and the testing-only vote limit parameter.
 - Members are now identified by last name, state, and district (for example, `Thompson CA 04`). The district is resolved to a Bioguide ID for each congress through the Congress.gov Members endpoint, because the roll call vote data does not include district. A congress in which no member with that last name served that district is skipped with a warning.
 - The program now collects every House roll call vote in the requested congresses, not only the ones the member voted on. Missed votes appear as "Not Voting" and are flagged in the new "Missed Vote" column.
 - Removed the temporary 10-vote testing limit from the command line script, so a run now processes every roll call. Expect runs to take much longer, since each roll call requires an API request and a page fetch from clerk.house.gov.
@@ -109,6 +117,7 @@ Example: `Thompson_20251025.csv`
 - `CONGRESS_API_KEY` (Required): Your Congress.gov API key
 - `JSON_LOGS` (Optional): Set to 'true' for structured JSON logging
 - `VERBOSE` (Optional): Set to 'true' for debug-level logging
+- `RCV_REFRESH` (Optional): Set to 'true' to ignore cached roll calls and fetch them again
 
 ## Error Handling
 
@@ -126,7 +135,8 @@ The application includes comprehensive error handling for:
 The application follows SOLID principles and uses dependency injection:
 
 - **Models**: Data structures with validation for vote records and API responses
-- **API Client**: Congress.gov API interaction with retry logic and rate limiting
+- **API Client**: Congress.gov API interaction with retry logic, rate limit handling, and the vote list
+- **Vote Cache**: On-disk cache of roll call data, shared across legislators
 - **Web Scraper**: Extracts additional details from clerk.house.gov with multiple fallback patterns
 - **Vote Collector**: Iterates over every roll call in each congress, records the member's vote on each, and generates roll call URLs
 - **CSV Exporter**: Handles output file generation with all 9 columns
@@ -150,17 +160,18 @@ rcv-votes/
 ├── rcv                          # Main CLI script
 ├── requirements.txt             # Python dependencies
 ├── .env                        # API key configuration (create this)
-├── config_template.py          # Configuration helper
 ├── rcv_votes/                  # Main package
 │   ├── __init__.py
 │   ├── exceptions.py           # Custom exceptions
 │   ├── models.py              # Data models
 │   ├── logging_config.py      # Logging configuration
 │   ├── congress_api.py        # Congress.gov API client
+│   ├── vote_cache.py          # On-disk roll call cache
 │   ├── web_scraper.py         # Web scraping functionality
 │   ├── vote_collector.py      # Vote collection orchestration
 │   ├── csv_exporter.py        # CSV export functionality
 │   └── container.py           # Dependency injection container
+├── cache/                     # Cached roll call data (created automatically)
 └── outputs/                   # Generated CSV files (created automatically)
 ```
 
@@ -189,7 +200,7 @@ rcv-votes/
 
 3. **Rate limiting errors**
    - The application includes automatic retry logic with exponential backoff
-   - If persistent, try running with fewer Congress sessions at once
+   - If the limit is still hit, the run stops and saves a `_PARTIAL` file. Wait for the limit to reset and re-run the same command; cached roll calls are not requested again
 
 4. **Web scraping warnings**
    - The program continues running and includes partial data when scraping fails

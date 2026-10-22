@@ -8,24 +8,27 @@ import random
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
 
-from .models import APIVoteData
-from .exceptions import APIError, ValidationError
+from .models import RollCallData
+from .exceptions import APIError, RateLimitExceeded, ValidationError
 from .logging_config import get_logger
 
 
 class CongressAPIClient:
     """Client for interacting with the Congress.gov API."""
     
-    def __init__(self, api_key: str, base_url: str = "https://api.congress.gov/v3/"):
+    def __init__(self, api_key: str, base_url: str = "https://api.congress.gov/v3/",
+                 request_delay: float = 0.05):
         """
         Initialize the Congress API client.
         
         Args:
             api_key: Congress.gov API key
             base_url: Base URL for the Congress.gov API
+            request_delay: Seconds to pause before each request
         """
         self.api_key = api_key
         self.base_url = base_url
+        self.request_delay = request_delay
         self.session = requests.Session()
         self.logger = get_logger('congress_api')
         
@@ -35,9 +38,70 @@ class CongressAPIClient:
             'Accept': 'application/json'
         })
     
-    def get_house_vote_members(self, congress: int, session: int, vote_number: int) -> List[APIVoteData]:
+    def list_house_vote_numbers(self, congress: int, session: int) -> Optional[List[int]]:
         """
-        Get member votes for a specific House roll call vote.
+        List every roll call number in a session using the paginated list endpoint.
+        
+        This replaces probing numbers one at a time until errors stop, and lets the
+        program know exactly which roll calls exist.
+        
+        Args:
+            congress: Congress number (e.g., 118)
+            session: Session number (1 or 2)
+            
+        Returns:
+            Sorted roll call numbers (empty if the session has no votes), or None if the
+            response was not in the expected format and the caller should fall back
+            to probing.
+            
+        Raises:
+            APIError: If the API request fails (RateLimitExceeded if rate limited)
+        """
+        url = urljoin(self.base_url, f"house-vote/{congress}/{session}")
+        page_size = 250
+        offset = 0
+        numbers: List[int] = []
+        
+        while True:
+            params = {'api_key': self.api_key, 'format': 'json', 'limit': page_size, 'offset': offset}
+            
+            try:
+                response = self._make_request_with_retry(url, params)
+                data = response.json()
+            except requests.exceptions.RequestException as e:
+                raise APIError(f"Failed to list votes: {e}") from e
+            except APIError as e:
+                if e.status_code == 404 and offset == 0:
+                    return []  # Session does not exist (yet)
+                raise
+            
+            items = data.get('houseRollCallVotes') if isinstance(data, dict) else None
+            if not isinstance(items, list):
+                self.logger.warning("Vote list response not in expected format")
+                return None
+            
+            total = data.get('pagination', {}).get('count') if isinstance(data.get('pagination'), dict) else None
+            
+            if not items:
+                if offset == 0 and isinstance(total, int) and total > 0:
+                    return None  # Count says votes exist but none were listed
+                break
+            
+            for item in items:
+                number = item.get('rollCallNumber') if isinstance(item, dict) else None
+                if isinstance(number, int):
+                    numbers.append(number)
+            
+            offset += len(items)
+            if len(items) < page_size or (isinstance(total, int) and offset >= total):
+                break
+        
+        self.logger.debug(f"Congress {congress} Session {session} has {len(numbers)} roll call votes")
+        return sorted(set(numbers))
+    
+    def get_roll_call(self, congress: int, session: int, vote_number: int) -> RollCallData:
+        """
+        Get a specific House roll call vote, including every member's vote.
         
         Args:
             congress: Congress number (e.g., 118)
@@ -45,10 +109,10 @@ class CongressAPIClient:
             vote_number: Roll call vote number
             
         Returns:
-            List of vote data for all members
+            Roll call metadata and a mapping of Bioguide ID to raw vote
             
         Raises:
-            APIError: If the API request fails
+            APIError: If the API request fails (status_code 404 if the vote does not exist)
             ValidationError: If the response data is invalid
         """
         endpoint = f"house-vote/{congress}/{session}/{vote_number}/members"
@@ -60,13 +124,11 @@ class CongressAPIClient:
             self.logger.debug(f"Requesting vote data for Congress {congress}, Session {session}, Vote {vote_number}")
             
             response = self._make_request_with_retry(url, params)
+            roll_call = self._parse_roll_call_response(response.json())
             
-            # Parse response
-            vote_data = self._parse_vote_response(response.json())
+            self.logger.debug(f"Retrieved {len(roll_call.votes)} member votes for vote {vote_number}")
             
-            self.logger.debug(f"Retrieved {len(vote_data)} member votes for vote {vote_number}")
-            
-            return vote_data
+            return roll_call
             
         except requests.exceptions.RequestException as e:
             raise APIError(f"Failed to retrieve vote data: {e}") from e
@@ -123,6 +185,28 @@ class CongressAPIClient:
         self.logger.debug(f"Resolved {last_name} {state.upper()}-{district} in Congress {congress} to {bioguide_ids}")
         return bioguide_ids
     
+    @staticmethod
+    def _safe_json(response: requests.Response) -> Optional[Any]:
+        """Decode a JSON body, returning None if there is no body or it is not JSON."""
+        if not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            return None
+    
+    def _log_rate_limit_headers(self, response: requests.Response) -> None:
+        """Log remaining request quota when the API reports it."""
+        remaining = response.headers.get('X-RateLimit-Remaining')
+        if remaining is None:
+            return
+        self.logger.debug(f"API requests remaining: {remaining}")
+        try:
+            if int(remaining) <= 25:
+                self.logger.warning(f"Only {remaining} API requests remaining in the current rate limit window")
+        except ValueError:
+            pass
+    
     def _make_request_with_retry(self, url: str, params: Dict[str, Any], 
                                 max_retries: int = 3) -> requests.Response:
         """
@@ -137,35 +221,41 @@ class CongressAPIClient:
             HTTP response object
             
         Raises:
-            APIError: If all retry attempts fail
+            RateLimitExceeded: If still rate limited after all retries
+            APIError: If the request fails
         """
         for attempt in range(max_retries):
+            if self.request_delay:
+                time.sleep(self.request_delay)
+            
             try:
                 response = self.session.get(url, params=params, timeout=30)
+                self._log_rate_limit_headers(response)
                 
                 # Check for rate limiting
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', 60))
+                    try:
+                        retry_after = int(response.headers.get('Retry-After', 60))
+                    except ValueError:
+                        retry_after = 60
                     if attempt < max_retries - 1:
                         self.logger.warning(f"Rate limited, waiting {retry_after}s before retry")
                         time.sleep(retry_after)
                         continue
-                    else:
-                        raise APIError("Rate limit exceeded after all retries", response.status_code)
+                    raise RateLimitExceeded("Rate limit exceeded after all retries", response.status_code)
                 
                 # Check for vote not found (this is expected when we reach the end)
                 if response.status_code == 404:
-                    raise APIError("Vote not found", 404, response.json() if response.content else None)
+                    raise APIError("Not found", 404, self._safe_json(response))
                 
                 # Check for other client/server errors
                 if response.status_code >= 400:
-                    error_data = response.json() if response.content else None
+                    error_data = self._safe_json(response)
                     error_msg = f"API request failed with status {response.status_code}"
-                    if error_data and 'error' in error_data:
+                    if isinstance(error_data, dict) and 'error' in error_data:
                         error_msg += f": {error_data['error']}"
                     raise APIError(error_msg, response.status_code, error_data)
                 
-                response.raise_for_status()
                 return response
                 
             except requests.exceptions.Timeout as e:
@@ -186,15 +276,15 @@ class CongressAPIClient:
         
         raise APIError("Unexpected error in request retry logic")
     
-    def _parse_vote_response(self, response_data: Dict[str, Any]) -> List[APIVoteData]:
+    def _parse_roll_call_response(self, response_data: Dict[str, Any]) -> RollCallData:
         """
-        Parse API response and extract vote data.
+        Parse an API response into roll call data.
         
         Args:
             response_data: Raw API response data
             
         Returns:
-            List of parsed vote data objects
+            Parsed roll call with a Bioguide ID to vote mapping
             
         Raises:
             ValidationError: If response format is invalid
@@ -211,70 +301,44 @@ class CongressAPIClient:
             raise ValidationError("API response missing expected vote data field")
         
         # Handle both list and single object formats
-        if not isinstance(roll_call_votes, list):
-            roll_call_votes = [roll_call_votes]
+        if isinstance(roll_call_votes, list):
+            if not roll_call_votes:
+                raise ValidationError("API response vote data is empty")
+            vote_info = roll_call_votes[0]
+        else:
+            vote_info = roll_call_votes
         
-        if not isinstance(roll_call_votes, list) or not roll_call_votes:
-            raise ValidationError("houseRollCallMemberVotes must be a non-empty list")
+        if not isinstance(vote_info, dict):
+            raise ValidationError("API response vote data has unexpected format")
         
-        # Extract vote information from the first vote record (metadata is the same for all)
-        vote_info = roll_call_votes[0]
+        # Only fields the program actually uses are required. Legislation fields are
+        # optional because some votes (quorum calls, etc.) have no legislation.
+        required_fields = ['congress', 'rollCallNumber', 'sessionNumber',
+                           'sourceDataURL', 'startDate', 'voteQuestion']
+        for field_name in required_fields:
+            if field_name not in vote_info:
+                raise ValidationError(f"Vote metadata missing required field: {field_name}")
         
-        # Validate core required fields (some votes like quorum calls may not have legislation info)
-        core_required_fields = [
-            'congress', 'rollCallNumber', 'sessionNumber', 'sourceDataURL', 
-            'startDate', 'updateDate', 'voteQuestion', 'voteType', 'result', 'identifier'
-        ]
-        
-        for field in core_required_fields:
-            if field not in vote_info:
-                raise ValidationError(f"Vote metadata missing required field: {field}")
-        
-        # Handle optional legislation fields (not present in quorum calls, etc.)
-        legislation_number = vote_info.get('legislationNumber', '')
-        legislation_type = vote_info.get('legislationType', '')
-        legislation_url = vote_info.get('legislationUrl', '')
-        
-        # Extract member results
         if 'results' not in vote_info or not isinstance(vote_info['results'], list):
             raise ValidationError("Vote data missing member results")
         
-        vote_data_list = []
-        
+        votes: Dict[str, str] = {}
         for member_vote in vote_info['results']:
-            # Validate member vote data
-            member_required_fields = ['bioguideID', 'firstName', 'lastName', 'voteCast', 'voteParty', 'voteState']
-            
-            for field in member_required_fields:
-                if field not in member_vote:
-                    raise ValidationError(f"Member vote data missing required field: {field}")
-            
-            # Create APIVoteData object
-            vote_data = APIVoteData(
-                congress=vote_info['congress'],
-                identifier=vote_info['identifier'],
-                legislation_number=legislation_number,
-                legislation_type=legislation_type,
-                legislation_url=legislation_url,
-                bio_guide_id=member_vote['bioguideID'],
-                first_name=member_vote['firstName'],
-                last_name=member_vote['lastName'],
-                vote_cast=member_vote['voteCast'],
-                vote_party=member_vote['voteParty'],
-                vote_state=member_vote['voteState'],
-                result=vote_info['result'],
-                roll_call_number=vote_info['rollCallNumber'],
-                session_number=vote_info['sessionNumber'],
-                source_data_url=vote_info['sourceDataURL'],
-                start_date=vote_info['startDate'],
-                update_date=vote_info['updateDate'],
-                vote_question=vote_info['voteQuestion'],
-                vote_type=vote_info['voteType']
-            )
-            
-            vote_data_list.append(vote_data)
+            if not isinstance(member_vote, dict) or 'bioguideID' not in member_vote or 'voteCast' not in member_vote:
+                raise ValidationError("Member vote data missing bioguideID or voteCast")
+            votes[member_vote['bioguideID']] = member_vote['voteCast']
         
-        return vote_data_list
+        return RollCallData(
+            congress=vote_info['congress'],
+            session_number=vote_info['sessionNumber'],
+            roll_call_number=vote_info['rollCallNumber'],
+            legislation_type=vote_info.get('legislationType', ''),
+            legislation_number=vote_info.get('legislationNumber', ''),
+            source_data_url=vote_info['sourceDataURL'],
+            start_date=vote_info['startDate'],
+            vote_question=vote_info['voteQuestion'],
+            votes=votes
+        )
     
     def __enter__(self):
         """Context manager entry."""
