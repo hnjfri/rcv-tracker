@@ -65,6 +65,7 @@ class CSVExporter:
                     'Roll Call Number',
                     'Legislation',
                     'Vote Cast',
+                    'Missed Vote',
                     'Question',
                     'Bill Title',
                     'Roll Call Vote URL'
@@ -83,6 +84,7 @@ class CSVExporter:
                         'Roll Call Number': vote_record.roll_call_number,
                         'Legislation': vote_record.legislation,
                         'Vote Cast': vote_record.vote_cast,
+                        'Missed Vote': 'Yes' if vote_record.missed_vote else 'No',
                         'Question': vote_record.question,
                         'Bill Title': vote_record.bill_title,
                         'Roll Call Vote URL': vote_record.roll_call_vote_url

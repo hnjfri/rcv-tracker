@@ -7,7 +7,8 @@ import re
 from typing import List, Dict, Any, Generator, Tuple
 from dataclasses import asdict
 
-from .models import VoteRecord, APIVoteData, MemberSearchCriteria
+from .models import (VoteRecord, APIVoteData, MemberSearchCriteria,
+                     normalize_vote_cast, VOTE_NOT_ON_ROLL)
 from .congress_api import CongressAPIClient
 from .web_scraper import ClerkHouseGovScraper
 from .exceptions import APIError, ScrapingError, ValidationError
@@ -32,7 +33,8 @@ class VoteCollector:
     def collect_member_votes(self, search_criteria: MemberSearchCriteria, 
                            correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
         """
-        Collect all votes for a congress member across specified congress sessions.
+        Collect every House roll call vote in the specified congresses, recording the
+        target member's vote (Yea, Nay, Present, Not Voting, or Not on Roll) for each.
         
         Args:
             search_criteria: Member search criteria (name, state, congress numbers)
@@ -40,7 +42,8 @@ class VoteCollector:
             max_votes: Maximum number of votes to collect (for testing)
             
         Returns:
-            List of complete vote records for the member
+            List of vote records, one per roll call vote, in chronological order.
+            Empty if the member never appears on any roll call.
         """
         operation = f"collect_votes_{search_criteria.last_name}_{search_criteria.state}"
         log_operation_start(self.logger, operation, correlation_id, 
@@ -71,6 +74,16 @@ class VoteCollector:
                     self.logger.info(f"Reached maximum vote limit of {max_votes}, stopping collection")
                     break
             
+            # If the member never appears on any roll call, the name/state/congress
+            # inputs are almost certainly wrong; return nothing rather than a file
+            # full of "Not on Roll" rows.
+            if all_votes and all(v.vote_cast == VOTE_NOT_ON_ROLL for v in all_votes):
+                self.logger.warning(
+                    f"{search_criteria.last_name} ({search_criteria.state}) does not appear "
+                    f"on any of the {len(all_votes)} roll calls collected"
+                )
+                all_votes = []
+            
             duration = time.time() - start_time
             log_operation_success(self.logger, operation, correlation_id, duration,
                                 total_votes=len(all_votes),
@@ -87,7 +100,7 @@ class VoteCollector:
     def _collect_congress_votes(self, congress: int, last_name: str, state: str, 
                                correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
         """
-        Collect all votes for a member in a specific congress.
+        Collect all roll call votes in a specific congress, with the member's vote on each.
         
         Args:
             congress: Congress number
@@ -122,7 +135,7 @@ class VoteCollector:
     def _collect_session_votes(self, congress: int, session: int, last_name: str, 
                               state: str, correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
         """
-        Collect all votes for a member in a specific congress session.
+        Collect all roll call votes in a specific congress session, with the member's vote on each.
         
         Args:
             congress: Congress number
@@ -149,51 +162,66 @@ class VoteCollector:
                 # Get vote data from API
                 api_vote_data = self.api_client.get_house_vote_members(congress, session, vote_number)
                 
-                # Find the target member's vote
+                if not api_vote_data:
+                    # Roll call exists but has no member results; nothing to record
+                    self.logger.warning(f"Vote {vote_number}: API returned no member results, skipping")
+                    consecutive_failures = 0
+                    vote_number += 1
+                    continue
+                
+                # Roll call metadata is identical on every member entry
+                roll_call_info = api_vote_data[0]
+                
+                # Find the target member's vote (None if member is not on this roll call)
                 member_vote = self._find_member_vote(api_vote_data, last_name, state)
                 
+                # Every roll call produces a record, including ones the member missed
                 if member_vote:
-                    # Get additional details from web scraping (always returns valid data, even if empty)
-                    scraped_details = self.web_scraper.extract_vote_details(member_vote.source_data_url)
-                    
-                    # Use scraped question if available, otherwise fall back to API question
-                    question = scraped_details.question if scraped_details.question else member_vote.vote_question
-                    
-                    # Use scraped date if available, otherwise extract from start_date
-                    date = scraped_details.date
-                    if date == "1900-01-01":  # Fallback date was used
-                        # Try to extract date from API start_date (e.g., "2023-01-03T12:28:00-05:00")
-                        try:
-                            api_date = member_vote.start_date.split('T')[0]  # Get YYYY-MM-DD part
-                            if re.match(r'^\d{4}-\d{2}-\d{2}$', api_date):
-                                date = api_date
-                        except:
-                            pass  # Keep fallback date
-                    
-                    # Generate roll call vote URL from source data URL
-                    roll_call_vote_url = self._generate_roll_call_url(member_vote.source_data_url)
-                    
-                    # Create complete vote record (with empty strings for missing data)
-                    vote_record = VoteRecord(
-                        congress=member_vote.congress,
-                        date=date,
-                        roll_call_number=member_vote.roll_call_number,
-                        legislation=member_vote.legislation,
-                        vote_cast=member_vote.vote_cast,
-                        question=question,
-                        bill_title=scraped_details.bill_title,
-                        roll_call_vote_url=roll_call_vote_url
-                    )
-                    
-                    session_votes.append(vote_record)
-                    
-                    self.logger.debug(f"Collected vote {vote_number}: {member_vote.legislation} - {member_vote.vote_cast}")
-                    
-                    # Log if we had to use fallback data
-                    if not scraped_details.question and not scraped_details.bill_title:
-                        self.logger.debug(f"Vote {vote_number}: Used API data only (scraping found no additional details)")
-                    elif not scraped_details.question or not scraped_details.bill_title:
-                        self.logger.debug(f"Vote {vote_number}: Partial scraping success")
+                    vote_cast = normalize_vote_cast(member_vote.vote_cast)
+                else:
+                    vote_cast = VOTE_NOT_ON_ROLL
+                
+                # Get additional details from web scraping (always returns valid data, even if empty)
+                scraped_details = self.web_scraper.extract_vote_details(roll_call_info.source_data_url)
+                
+                # Use scraped question if available, otherwise fall back to API question
+                question = scraped_details.question if scraped_details.question else roll_call_info.vote_question
+                
+                # Use scraped date if available, otherwise extract from start_date
+                date = scraped_details.date
+                if date == "1900-01-01":  # Fallback date was used
+                    # Try to extract date from API start_date (e.g., "2023-01-03T12:28:00-05:00")
+                    try:
+                        api_date = roll_call_info.start_date.split('T')[0]  # Get YYYY-MM-DD part
+                        if re.match(r'^\d{4}-\d{2}-\d{2}$', api_date):
+                            date = api_date
+                    except Exception:
+                        pass  # Keep fallback date
+                
+                # Generate roll call vote URL from source data URL
+                roll_call_vote_url = self._generate_roll_call_url(roll_call_info.source_data_url)
+                
+                # Create complete vote record (with empty strings for missing data)
+                vote_record = VoteRecord(
+                    congress=roll_call_info.congress,
+                    date=date,
+                    roll_call_number=roll_call_info.roll_call_number,
+                    legislation=roll_call_info.legislation,
+                    vote_cast=vote_cast,
+                    question=question,
+                    bill_title=scraped_details.bill_title,
+                    roll_call_vote_url=roll_call_vote_url
+                )
+                
+                session_votes.append(vote_record)
+                
+                self.logger.debug(f"Collected vote {vote_number}: {roll_call_info.legislation} - {vote_cast}")
+                
+                # Log if we had to use fallback data
+                if not scraped_details.question and not scraped_details.bill_title:
+                    self.logger.debug(f"Vote {vote_number}: Used API data only (scraping found no additional details)")
+                elif not scraped_details.question or not scraped_details.bill_title:
+                    self.logger.debug(f"Vote {vote_number}: Partial scraping success")
                 
                 # Reset failure counter on successful API call
                 consecutive_failures = 0

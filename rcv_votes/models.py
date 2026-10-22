@@ -10,6 +10,46 @@ import re
 from .exceptions import ValidationError
 
 
+# Standardized vote categories used in the output
+VOTE_YEA = "Yea"
+VOTE_NAY = "Nay"
+VOTE_PRESENT = "Present"
+VOTE_NOT_VOTING = "Not Voting"
+VOTE_NOT_ON_ROLL = "Not on Roll"  # Member does not appear in the roll call at all
+
+_VOTE_CAST_MAP = {
+    "yea": VOTE_YEA,
+    "aye": VOTE_YEA,
+    "yes": VOTE_YEA,
+    "nay": VOTE_NAY,
+    "no": VOTE_NAY,
+    "present": VOTE_PRESENT,
+    "not voting": VOTE_NOT_VOTING,
+    "notvoting": VOTE_NOT_VOTING,
+    "absent": VOTE_NOT_VOTING,
+}
+
+
+def normalize_vote_cast(raw_vote_cast: str) -> str:
+    """
+    Normalize a raw vote value from the API into a standard category.
+
+    Maps Aye/Yea/Yes to "Yea", Nay/No to "Nay", "Present" to "Present", and
+    "Not Voting"/"Absent" to "Not Voting". Unrecognized values are returned
+    unchanged (stripped) so no data is silently discarded.
+
+    Args:
+        raw_vote_cast: Vote value as returned by the Congress.gov API
+
+    Returns:
+        Standardized vote category string
+    """
+    if not isinstance(raw_vote_cast, str) or not raw_vote_cast.strip():
+        return VOTE_NOT_VOTING
+    cleaned = raw_vote_cast.strip()
+    return _VOTE_CAST_MAP.get(cleaned.lower(), cleaned)
+
+
 @dataclass
 class VoteRecord:
     """Represents a single vote record for a congress member."""
@@ -17,7 +57,7 @@ class VoteRecord:
     date: str  # YYYY-MM-DD format
     roll_call_number: int
     legislation: str  # e.g., "HR758"
-    vote_cast: str  # e.g., "Yea", "Nay", "Present"
+    vote_cast: str  # One of: "Yea", "Nay", "Present", "Not Voting", "Not on Roll"
     question: str  # e.g., "On Motion to Suspend the Rules and Pass"
     bill_title: str  # e.g., "Mail Traffic Deaths Reporting Act"
     roll_call_vote_url: str  # e.g., "https://clerk.house.gov/Votes/202555"
@@ -25,6 +65,11 @@ class VoteRecord:
     def __post_init__(self):
         """Validate data after initialization."""
         self.validate()
+    
+    @property
+    def missed_vote(self) -> bool:
+        """True if the member was listed on the roll call but did not vote."""
+        return self.vote_cast == VOTE_NOT_VOTING
     
     def validate(self) -> None:
         """Validate all fields meet requirements."""

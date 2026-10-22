@@ -1,10 +1,12 @@
 # Roll Call Vote (RCV) Tracker
 
-A Python application that uses the Congress.gov API to pull roll call votes for specified members of Congress across multiple congressional sessions.
+A Python application that uses the Congress.gov API to pull every House roll call vote in one or more congresses and report how a specified member voted on each one, including votes the member missed.
 
 ## Features
 
-- Retrieves roll call votes from Congress.gov API
+- Retrieves every House roll call vote in the requested congresses from Congress.gov API
+- Records the specified member's vote on each roll call: Yea, Nay, Present, or Not Voting
+- Flags missed votes in a dedicated column so they can be filtered in a spreadsheet
 - Scrapes additional vote details from clerk.house.gov
 - Supports multiple Congress sessions in a single run
 - Exports results to CSV format with proper date formatting
@@ -58,23 +60,41 @@ chmod +x rcv
 ```
 
 This will:
-1. Search for all roll call votes by a member with last name "Thompson" from California (CA)
-2. Look through Congress sessions 118 and 119
+1. Find every House roll call vote in Congress sessions 118 and 119
+2. Identify the member with last name "Thompson" from California (CA) on each roll call and record how they voted (including Not Voting)
 3. Extract vote details including question and bill title
-4. Save results to `outputs/Thompson_YYYYMMDD.csv`
+4. Save results to `outputs/Thompson_YYYYMMDD.csv`, one row per roll call
+
+## Recent Updates
+
+- The program now collects every House roll call vote in the requested congresses, not only the ones the member voted on. Missed votes appear as "Not Voting" and are flagged in the new "Missed Vote" column.
+- Removed the temporary 10-vote testing limit from the command line script, so a run now processes every roll call. Expect runs to take much longer, since each roll call requires an API request and a page fetch from clerk.house.gov.
 
 ## Output
 
-The program creates CSV files in the `outputs/` directory with the following columns:
+The program creates CSV files in the `outputs/` directory with one row per roll call vote, whether or not the member voted. The file has the following columns:
 
 1. **Congress** - Congress number (e.g., 118)
 2. **Date** - Vote date in YYYY-MM-DD format
 3. **Roll Call Number** - Roll call vote number
 4. **Legislation** - Legislation identifier (e.g., "HR758") or "Non-Legislative" for procedural votes
-5. **Vote Cast** - How the member voted (e.g., "Yea", "Nay", "Present")
-6. **Question** - The question being voted on
-7. **Bill Title** - Title of the bill or resolution (may be empty for non-legislative votes)
-8. **Roll Call Vote URL** - Direct link to the House clerk's vote page
+5. **Vote Cast** - How the member voted: "Yea", "Nay", "Present", or "Not Voting" (see below)
+6. **Missed Vote** - "Yes" if Vote Cast is "Not Voting", otherwise "No". Filter this column to see every vote the member missed.
+7. **Question** - The question being voted on
+8. **Bill Title** - Title of the bill or resolution (may be empty for non-legislative votes)
+9. **Roll Call Vote URL** - Direct link to the House clerk's vote page
+
+### Vote Cast Values
+
+The API's "Aye" and "Yea" are both reported as "Yea", and "No" and "Nay" as "Nay". The values are:
+
+- **Yea** - voted yes
+- **Nay** - voted no
+- **Present** - voted present
+- **Not Voting** - listed on the roll call but did not vote (absent). These rows have Missed Vote = "Yes".
+- **Not on Roll** - the member does not appear on that roll call at all (for example, before being sworn in or after leaving office, or during a vacancy). These rows have Missed Vote = "No" because the member was not eligible to vote.
+
+If the member does not appear on any roll call in the requested congresses, no file is written and the program reports that no votes were found.
 
 ### Output File Naming
 
@@ -97,7 +117,7 @@ The application includes comprehensive error handling for:
 - API rate limiting and network errors
 - Web scraping failures (continues with partial data)
 - File I/O errors
-- Missing or incomplete vote data (includes all votes with empty fields when data unavailable)
+- Missing or incomplete vote data (includes all roll calls with empty fields when data unavailable)
 
 ## Architecture
 
@@ -106,8 +126,8 @@ The application follows SOLID principles and uses dependency injection:
 - **Models**: Data structures with validation for vote records and API responses
 - **API Client**: Congress.gov API interaction with retry logic and rate limiting
 - **Web Scraper**: Extracts additional details from clerk.house.gov with multiple fallback patterns
-- **Vote Collector**: Orchestrates data collection workflow and generates roll call URLs
-- **CSV Exporter**: Handles output file generation with all 8 columns
+- **Vote Collector**: Iterates over every roll call in each congress, records the member's vote on each, and generates roll call URLs
+- **CSV Exporter**: Handles output file generation with all 9 columns
 - **Container**: Dependency injection and configuration management
 
 ## Logging
@@ -162,6 +182,7 @@ rcv-votes/
    - Check the spelling of the member's last name
    - Verify the state abbreviation is correct
    - Ensure the member served during the specified Congress sessions
+   - The member must appear on at least one roll call in the requested congresses
 
 3. **Rate limiting errors**
    - The application includes automatic retry logic with exponential backoff

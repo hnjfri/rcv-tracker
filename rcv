@@ -119,16 +119,17 @@ def main():
             
             # Print user-friendly start message
             congress_list = ', '.join(map(str, search_criteria.congress_numbers))
-            print(f"Collecting roll call votes for {search_criteria.last_name} ({search_criteria.state})")
+            print(f"Collecting all roll call votes, with the vote of {search_criteria.last_name} ({search_criteria.state}) on each")
             print(f"Congress sessions: {congress_list}")
             print("")
             
             start_time = time.time()
             
             try:
-                # Collect votes for the member (limit to 10 for testing)
+                # Collect every roll call vote in the requested congresses, with the
+                # member's vote (including missed votes) on each
                 vote_records = container.vote_collector.collect_member_votes(
-                    search_criteria, correlation_id, max_votes=10
+                    search_criteria, correlation_id
                 )
                 
                 if not vote_records:
@@ -136,7 +137,7 @@ def main():
                     print("This could mean:")
                     print("- The member name or state is incorrect")
                     print("- The member did not serve in the specified congress sessions")
-                    print("- There were no recorded votes for this member")
+                    print("- No roll call votes were found for the specified congress sessions")
                     sys.exit(0)
                 
                 # Export to CSV
@@ -146,7 +147,9 @@ def main():
                 
                 # Success message
                 duration = time.time() - start_time
-                print(f"[SUCCESS] Collected {len(vote_records)} votes in {duration:.1f} seconds")
+                missed = sum(1 for r in vote_records if r.missed_vote)
+                print(f"[SUCCESS] Collected {len(vote_records)} roll calls in {duration:.1f} seconds")
+                print(f"Missed votes (Not Voting): {missed}")
                 print(f"Results saved to: {csv_file_path}")
                 
                 # Log successful completion
