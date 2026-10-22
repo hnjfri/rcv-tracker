@@ -29,13 +29,14 @@ class CSVExporter:
         self.output_directory.mkdir(exist_ok=True)
     
     def export_votes(self, vote_records: List[VoteRecord], member_last_name: str,
-                     partial: bool = False) -> str:
+                     congress: int, partial: bool = False) -> str:
         """
         Export vote records to CSV file.
         
         Args:
             vote_records: List of vote records to export
             member_last_name: Last name of the congress member (for filename)
+            congress: Congress number (for filename, so different congresses do not overwrite each other)
             partial: If True, the data is incomplete (failures or an early stop) and
                 the filename is suffixed with _PARTIAL so it is not mistaken for a full run
             
@@ -54,7 +55,7 @@ class CSVExporter:
         # Generate filename with today's date
         today = datetime.now().strftime("%Y%m%d")
         suffix = "_PARTIAL" if partial else ""
-        filename = f"{member_last_name}_{today}{suffix}.csv"
+        filename = f"{member_last_name}_{congress}_{today}{suffix}.csv"
         file_path = self.output_directory / filename
         
         self.logger.info(f"Exporting {len(vote_records)} vote records to {file_path}")

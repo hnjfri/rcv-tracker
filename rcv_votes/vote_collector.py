@@ -52,7 +52,7 @@ class VoteCollector:
     def collect_member_votes(self, search_criteria: MemberSearchCriteria,
                              correlation_id: str) -> CollectionResult:
         """
-        Collect every House roll call vote in the specified congresses, recording the
+        Collect every House roll call vote in the specified congress, recording the
         target member's vote (Yea, Nay, Present, Not Voting, or Not on Roll) for each.
         
         Individual roll calls that fail are recorded and skipped rather than aborting the
@@ -60,7 +60,7 @@ class VoteCollector:
         so far is returned; completed roll calls are cached, so re-running resumes cheaply.
         
         Args:
-            search_criteria: Member search criteria (name, state, district, congress numbers)
+            search_criteria: Member search criteria (name, state, district, congress number)
             correlation_id: Unique ID for tracking this operation
             
         Returns:
@@ -73,7 +73,7 @@ class VoteCollector:
                           member=search_criteria.last_name,
                           state=search_criteria.state,
                           district=search_criteria.district,
-                          congresses=search_criteria.congress_numbers)
+                          congress=search_criteria.congress)
         
         start_time = time.time()
         self._reset_run_state()
@@ -81,24 +81,22 @@ class VoteCollector:
         aborted_reason: Optional[str] = None
         
         try:
-            for congress in search_criteria.congress_numbers:
-                self.logger.info(f"Processing Congress {congress} for {search_criteria.last_name} "
-                                 f"({search_criteria.state}-{search_criteria.district})")
-                
-                # Resolve the member's Bioguide ID(s) for this congress via name, state, district
-                bioguide_ids = self.api_client.get_member_bioguide_ids(
-                    congress, search_criteria.state, search_criteria.district, search_criteria.last_name
+            congress = search_criteria.congress
+            self.logger.info(f"Processing Congress {congress} for {search_criteria.last_name} "
+                             f"({search_criteria.state}-{search_criteria.district})")
+            
+            # Resolve the member's Bioguide ID(s) for this congress via name, state, district
+            bioguide_ids = self.api_client.get_member_bioguide_ids(
+                congress, search_criteria.state, search_criteria.district, search_criteria.last_name
+            )
+            if not bioguide_ids:
+                self.logger.warning(
+                    f"No member named {search_criteria.last_name} found for "
+                    f"{search_criteria.state}-{search_criteria.district} in Congress {congress}"
                 )
-                if not bioguide_ids:
-                    self.logger.warning(
-                        f"No member named {search_criteria.last_name} found for "
-                        f"{search_criteria.state}-{search_criteria.district} in Congress {congress}; skipping"
-                    )
-                    continue
-                
-                before = len(records)
+            else:
                 self._collect_congress_votes(congress, set(bioguide_ids), records)
-                self.logger.info(f"Collected {len(records) - before} roll calls for Congress {congress}")
+                self.logger.info(f"Collected {len(records)} roll calls for Congress {congress}")
         
         except RateLimitExceeded as e:
             aborted_reason = (f"API rate limit reached; collection stopped early. "
@@ -126,7 +124,7 @@ class VoteCollector:
                             failures=len(self._failures),
                             cache_hits=self._cache_hits,
                             api_calls=self._api_calls,
-                            congresses_processed=len(search_criteria.congress_numbers))
+                            congress=search_criteria.congress)
         
         return CollectionResult(
             records=records,

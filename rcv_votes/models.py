@@ -208,7 +208,7 @@ class MemberSearchCriteria:
     last_name: str
     state: str
     district: int
-    congress_numbers: List[int]
+    congress: int
     
     def __post_init__(self):
         """Validate search criteria."""
@@ -221,12 +221,8 @@ class MemberSearchCriteria:
         if not isinstance(self.district, int) or isinstance(self.district, bool) or self.district < 0:
             raise ValidationError("District must be a non-negative integer", "district", str(self.district))
         
-        if not self.congress_numbers or not isinstance(self.congress_numbers, list):
-            raise ValidationError("Congress numbers must be a non-empty list", "congress_numbers", str(self.congress_numbers))
-        
-        for congress in self.congress_numbers:
-            if not isinstance(congress, int) or congress < 1:
-                raise ValidationError("All congress numbers must be positive integers", "congress_numbers", str(congress))
+        if not isinstance(self.congress, int) or isinstance(self.congress, bool) or self.congress < 1:
+            raise ValidationError("Congress number must be a positive integer", "congress", str(self.congress))
         
         # Clean up data
         self.last_name = self.last_name.strip()

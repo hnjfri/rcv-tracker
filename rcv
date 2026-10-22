@@ -2,9 +2,9 @@
 """
 Roll Call Vote (RCV) Tracker CLI
 
-Usage: ./rcv <last_name> <state> <district> <congress_number> [congress_number ...]
+Usage: ./rcv <last_name> <state> <district> <congress_number>
 
-Example: ./rcv Thompson CA 04 116 117 118 119
+Example: ./rcv Thompson CA 04 118
 """
 
 import sys
@@ -27,16 +27,16 @@ from rcv_votes.logging_config import log_operation_start, log_operation_success,
 
 def print_usage():
     """Print usage information."""
-    print("Usage: ./rcv <last_name> <state> <district> <congress_number> [congress_number ...]")
+    print("Usage: ./rcv <last_name> <state> <district> <congress_number>")
     print("")
     print("Arguments:")
     print("  last_name        Last name of the congress member")
     print("  state            Two-letter state abbreviation (e.g., CA, NY, TX)")
     print("  district         House district number (e.g., 04 or 4)")
-    print("  congress_number  Congress number(s) to search (e.g., 116 117 118 119)")
+    print("  congress_number  Congress number to search (e.g., 118). One congress per run.")
     print("")
     print("Example:")
-    print("  ./rcv Thompson CA 04 116 117 118 119")
+    print("  ./rcv Thompson CA 04 118")
     print("")
     print("Environment:")
     print("  CONGRESS_API_KEY  Required. Get from https://api.congress.gov/sign-up/")
@@ -72,9 +72,10 @@ def parse_arguments(args: list) -> MemberSearchCriteria:
     Raises:
         ValidationError: If arguments are invalid
     """
-    if len(args) < 4:
+    if len(args) != 4:
         raise ValidationError(
-            "Insufficient arguments. Need at least: <last_name> <state> <district> <congress_number>"
+            "Expected exactly 4 arguments: <last_name> <state> <district> <congress_number> "
+            "(one congress per run)"
         )
     
     last_name = args[0]
@@ -86,22 +87,17 @@ def parse_arguments(args: list) -> MemberSearchCriteria:
     except ValueError:
         raise ValidationError(f"Invalid district (must be integer): {args[2]}")
     
-    # Parse congress numbers
-    congress_numbers = []
-    for arg in args[3:]:
-        try:
-            congress_num = int(arg)
-            if congress_num < 1:
-                raise ValidationError(f"Congress number must be positive: {congress_num}")
-            congress_numbers.append(congress_num)
-        except ValueError:
-            raise ValidationError(f"Invalid congress number (must be integer): {arg}")
+    # Parse congress number
+    try:
+        congress = int(args[3])
+    except ValueError:
+        raise ValidationError(f"Invalid congress number (must be integer): {args[3]}")
     
     return MemberSearchCriteria(
         last_name=last_name,
         state=state,
         district=district,
-        congress_numbers=congress_numbers
+        congress=congress
     )
 
 
@@ -142,18 +138,17 @@ def main():
                               member=search_criteria.last_name,
                               state=search_criteria.state,
                               district=search_criteria.district,
-                              congresses=search_criteria.congress_numbers)
+                              congress=search_criteria.congress)
             
             # Print user-friendly start message
-            congress_list = ', '.join(map(str, search_criteria.congress_numbers))
             print(f"Collecting all roll call votes, with the vote of {search_criteria.last_name} ({search_criteria.state}-{search_criteria.district}) on each")
-            print(f"Congress sessions: {congress_list}")
+            print(f"Congress: {search_criteria.congress}")
             print("")
             
             start_time = time.time()
             
             try:
-                # Collect every roll call vote in the requested congresses, with the
+                # Collect every roll call vote in the requested congress, with the
                 # member's vote (including missed votes) on each
                 result = container.vote_collector.collect_member_votes(
                     search_criteria, correlation_id
@@ -171,7 +166,8 @@ def main():
                 
                 # Export to CSV (flagged as partial if anything was missed)
                 csv_file_path = container.csv_exporter.export_votes(
-                    vote_records, search_criteria.last_name, partial=not result.complete
+                    vote_records, search_criteria.last_name, search_criteria.congress,
+                    partial=not result.complete
                 )
                 
                 # Success message

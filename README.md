@@ -1,14 +1,14 @@
 # Roll Call Vote (RCV) Tracker
 
-A Python application that uses the Congress.gov API to pull every House roll call vote in one or more congresses and report how a specified member voted on each one, including votes the member missed.
+A Python application that uses the Congress.gov API to pull every House roll call vote in a congress and report how a specified member voted on each one, including votes the member missed.
 
 ## Features
 
-- Retrieves every House roll call vote in the requested congresses from Congress.gov API
+- Retrieves every House roll call vote in the requested congress from Congress.gov API
 - Records the specified member's vote on each roll call: Yea, Nay, Present, or Not Voting
 - Flags missed votes in a dedicated column so they can be filtered in a spreadsheet
 - Scrapes additional vote details from clerk.house.gov
-- Supports multiple Congress sessions in a single run
+- Runs one congress at a time (both sessions of that congress)
 - Caches roll call data on disk so reruns and additional legislators avoid repeat API requests
 - Keeps going when individual roll calls fail, and reports exactly what is missing
 - Exports results to CSV format with proper date formatting
@@ -46,7 +46,7 @@ chmod +x rcv
 ## Usage
 
 ```bash
-./rcv <last_name> <state> <district> <congress_number> [congress_number ...]
+./rcv <last_name> <state> <district> <congress_number>
 ```
 
 ### Arguments
@@ -54,22 +54,23 @@ chmod +x rcv
 - `last_name`: Last name of the congress member
 - `state`: Two-letter state abbreviation (e.g., CA, NY, TX)
 - `district`: House district number (e.g., 04 or 4)
-- `congress_number`: One or more Congress numbers to search (e.g., 118 119)
+- `congress_number`: The Congress to search (e.g., 118). One congress per run; run the command again for each additional congress.
 
 ### Example
 
 ```bash
-./rcv Thompson CA 04 118 119
+./rcv Thompson CA 04 118
 ```
 
 This will:
-1. Find every House roll call vote in Congress sessions 118 and 119
+1. Find every House roll call vote in the 118th Congress (both sessions)
 2. Identify the member with last name "Thompson" from California's 4th district (CA-04) on each roll call and record how they voted (including Not Voting)
 3. Extract vote details including question and bill title
-4. Save results to `outputs/Thompson_YYYYMMDD.csv`, one row per roll call
+4. Save results to `outputs/Thompson_118_YYYYMMDD.csv`, one row per roll call
 
 ## Recent Updates
 
+- The program now takes exactly one congress per run, and output files include the congress number (for example `Thompson_118_20251025.csv`) so runs for different congresses do not overwrite each other.
 - Roll call data is now cached in `cache/` (one small JSON file per roll call). The cache is not tied to a legislator, so running a second member for the same congress makes almost no API requests, and a run that is interrupted resumes where it left off. Delete `cache/` or set `RCV_REFRESH=true` to refetch.
 - The roll calls in each session are now taken from the API's vote list instead of probing numbers until requests fail. If the list is unavailable the program falls back to probing.
 - A roll call that fails (bad response, server error) no longer aborts the run. Failures are listed at the end and the CSV is saved with a `_PARTIAL` suffix. If the API rate limit is reached, collection stops, everything gathered is saved as `_PARTIAL`, and re-running the same command finishes the rest from the cache.
@@ -77,7 +78,7 @@ This will:
 - The run summary shows how many roll calls came from the cache and how many API requests were made.
 - Removed unused code: unused API fields and imports, the unused `config_template.py`, and the testing-only vote limit parameter.
 - Members are now identified by last name, state, and district (for example, `Thompson CA 04`). The district is resolved to a Bioguide ID for each congress through the Congress.gov Members endpoint, because the roll call vote data does not include district. A congress in which no member with that last name served that district is skipped with a warning.
-- The program now collects every House roll call vote in the requested congresses, not only the ones the member voted on. Missed votes appear as "Not Voting" and are flagged in the new "Missed Vote" column.
+- The program now collects every House roll call vote in the requested congress, not only the ones the member voted on. Missed votes appear as "Not Voting" and are flagged in the new "Missed Vote" column.
 - Removed the temporary 10-vote testing limit from the command line script, so a run now processes every roll call. Expect runs to take much longer, since each roll call requires an API request and a page fetch from clerk.house.gov.
 
 ## Output
@@ -104,13 +105,13 @@ The API's "Aye" and "Yea" are both reported as "Yea", and "No" and "Nay" as "Nay
 - **Not Voting** - listed on the roll call but did not vote (absent). These rows have Missed Vote = "Yes".
 - **Not on Roll** - the member does not appear on that roll call at all (for example, before being sworn in or after leaving office, or during a vacancy). These rows have Missed Vote = "No" because the member was not eligible to vote.
 
-If the member does not appear on any roll call in the requested congresses, no file is written and the program reports that no votes were found.
+If the member does not appear on any roll call in the requested congress, no file is written and the program reports that no votes were found.
 
 ### Output File Naming
 
-Files are named: `{LastName}_{YYYYMMDD}.csv`
+Files are named: `{LastName}_{Congress}_{YYYYMMDD}.csv` (with `_PARTIAL` before `.csv` if the run was incomplete)
 
-Example: `Thompson_20251025.csv`
+Example: `Thompson_118_20251025.csv`
 
 ## Environment Variables
 
@@ -194,9 +195,9 @@ rcv-votes/
 2. **"No votes found for [Member]"**
    - Check the spelling of the member's last name
    - Verify the state abbreviation and district number are correct
-   - Ensure the member served during the specified Congress sessions
+   - Ensure the member served during the specified Congress
    - The member must have represented that district in the requested congress (districts can change between congresses after redistricting)
-   - The member must appear on at least one roll call in the requested congresses
+   - The member must appear on at least one roll call in the requested congress
 
 3. **Rate limiting errors**
    - The application includes automatic retry logic with exponential backoff
