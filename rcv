@@ -2,9 +2,9 @@
 """
 Roll Call Vote (RCV) Tracker CLI
 
-Usage: ./rcv <last_name> <state> <congress_number> [congress_number ...]
+Usage: ./rcv <last_name> <state> <district> <congress_number> [congress_number ...]
 
-Example: ./rcv Thompson CA 116 117 118 119
+Example: ./rcv Thompson CA 04 116 117 118 119
 """
 
 import sys
@@ -27,15 +27,16 @@ from rcv_votes.logging_config import log_operation_start, log_operation_success,
 
 def print_usage():
     """Print usage information."""
-    print("Usage: ./rcv <last_name> <state> <congress_number> [congress_number ...]")
+    print("Usage: ./rcv <last_name> <state> <district> <congress_number> [congress_number ...]")
     print("")
     print("Arguments:")
     print("  last_name        Last name of the congress member")
     print("  state            Two-letter state abbreviation (e.g., CA, NY, TX)")
+    print("  district         House district number (e.g., 04 or 4)")
     print("  congress_number  Congress number(s) to search (e.g., 116 117 118 119)")
     print("")
     print("Example:")
-    print("  ./rcv Thompson CA 116 117 118 119")
+    print("  ./rcv Thompson CA 04 116 117 118 119")
     print("")
     print("Environment:")
     print("  CONGRESS_API_KEY  Required. Get from https://api.congress.gov/sign-up/")
@@ -55,17 +56,23 @@ def parse_arguments(args: list) -> MemberSearchCriteria:
     Raises:
         ValidationError: If arguments are invalid
     """
-    if len(args) < 3:
+    if len(args) < 4:
         raise ValidationError(
-            "Insufficient arguments. Need at least: <last_name> <state> <congress_number>"
+            "Insufficient arguments. Need at least: <last_name> <state> <district> <congress_number>"
         )
     
     last_name = args[0]
     state = args[1]
     
+    # Parse district (leading zeros allowed, e.g., "04")
+    try:
+        district = int(args[2])
+    except ValueError:
+        raise ValidationError(f"Invalid district (must be integer): {args[2]}")
+    
     # Parse congress numbers
     congress_numbers = []
-    for arg in args[2:]:
+    for arg in args[3:]:
         try:
             congress_num = int(arg)
             if congress_num < 1:
@@ -77,6 +84,7 @@ def parse_arguments(args: list) -> MemberSearchCriteria:
     return MemberSearchCriteria(
         last_name=last_name,
         state=state,
+        district=district,
         congress_numbers=congress_numbers
     )
 
@@ -115,11 +123,12 @@ def main():
             log_operation_start(logger, operation, correlation_id,
                               member=search_criteria.last_name,
                               state=search_criteria.state,
+                              district=search_criteria.district,
                               congresses=search_criteria.congress_numbers)
             
             # Print user-friendly start message
             congress_list = ', '.join(map(str, search_criteria.congress_numbers))
-            print(f"Collecting all roll call votes, with the vote of {search_criteria.last_name} ({search_criteria.state}) on each")
+            print(f"Collecting all roll call votes, with the vote of {search_criteria.last_name} ({search_criteria.state}-{search_criteria.district}) on each")
             print(f"Congress sessions: {congress_list}")
             print("")
             
@@ -133,9 +142,9 @@ def main():
                 )
                 
                 if not vote_records:
-                    print(f"[WARNING] No votes found for {search_criteria.last_name} ({search_criteria.state})")
+                    print(f"[WARNING] No votes found for {search_criteria.last_name} ({search_criteria.state}-{search_criteria.district})")
                     print("This could mean:")
-                    print("- The member name or state is incorrect")
+                    print("- The member name, state, or district is incorrect")
                     print("- The member did not serve in the specified congress sessions")
                     print("- No roll call votes were found for the specified congress sessions")
                     sys.exit(0)

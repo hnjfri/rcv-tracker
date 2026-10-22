@@ -159,6 +159,7 @@ class MemberSearchCriteria:
     """Search criteria for a congress member."""
     last_name: str
     state: str
+    district: int
     congress_numbers: List[int]
     
     def __post_init__(self):
@@ -168,6 +169,9 @@ class MemberSearchCriteria:
         
         if not self.state or not isinstance(self.state, str) or len(self.state) != 2:
             raise ValidationError("State must be a 2-letter abbreviation", "state", self.state)
+        
+        if not isinstance(self.district, int) or isinstance(self.district, bool) or self.district < 0:
+            raise ValidationError("District must be a non-negative integer", "district", str(self.district))
         
         if not self.congress_numbers or not isinstance(self.congress_numbers, list):
             raise ValidationError("Congress numbers must be a non-empty list", "congress_numbers", str(self.congress_numbers))

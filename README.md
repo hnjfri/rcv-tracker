@@ -44,29 +44,31 @@ chmod +x rcv
 ## Usage
 
 ```bash
-./rcv <last_name> <state> <congress_number> [congress_number ...]
+./rcv <last_name> <state> <district> <congress_number> [congress_number ...]
 ```
 
 ### Arguments
 
 - `last_name`: Last name of the congress member
 - `state`: Two-letter state abbreviation (e.g., CA, NY, TX)
+- `district`: House district number (e.g., 04 or 4)
 - `congress_number`: One or more Congress numbers to search (e.g., 118 119)
 
 ### Example
 
 ```bash
-./rcv Thompson CA 118 119
+./rcv Thompson CA 04 118 119
 ```
 
 This will:
 1. Find every House roll call vote in Congress sessions 118 and 119
-2. Identify the member with last name "Thompson" from California (CA) on each roll call and record how they voted (including Not Voting)
+2. Identify the member with last name "Thompson" from California's 4th district (CA-04) on each roll call and record how they voted (including Not Voting)
 3. Extract vote details including question and bill title
 4. Save results to `outputs/Thompson_YYYYMMDD.csv`, one row per roll call
 
 ## Recent Updates
 
+- Members are now identified by last name, state, and district (for example, `Thompson CA 04`). The district is resolved to a Bioguide ID for each congress through the Congress.gov Members endpoint, because the roll call vote data does not include district. A congress in which no member with that last name served that district is skipped with a warning.
 - The program now collects every House roll call vote in the requested congresses, not only the ones the member voted on. Missed votes appear as "Not Voting" and are flagged in the new "Missed Vote" column.
 - Removed the temporary 10-vote testing limit from the command line script, so a run now processes every roll call. Expect runs to take much longer, since each roll call requires an API request and a page fetch from clerk.house.gov.
 
@@ -180,8 +182,9 @@ rcv-votes/
 
 2. **"No votes found for [Member]"**
    - Check the spelling of the member's last name
-   - Verify the state abbreviation is correct
+   - Verify the state abbreviation and district number are correct
    - Ensure the member served during the specified Congress sessions
+   - The member must have represented that district in the requested congress (districts can change between congresses after redistricting)
    - The member must appear on at least one roll call in the requested congresses
 
 3. **Rate limiting errors**

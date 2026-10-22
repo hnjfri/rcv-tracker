@@ -71,6 +71,58 @@ class CongressAPIClient:
         except requests.exceptions.RequestException as e:
             raise APIError(f"Failed to retrieve vote data: {e}") from e
     
+    def get_member_bioguide_ids(self, congress: int, state: str, district: int,
+                                last_name: str) -> List[str]:
+        """
+        Resolve a House member to Bioguide ID(s) using last name, state, and district.
+        
+        The House roll call vote endpoint does not include district, so the member is
+        identified through the Members endpoint, which does. More than one person can
+        represent a district within a single congress (for example after a special
+        election), so the last name is used to pick the right one.
+        
+        Args:
+            congress: Congress number (e.g., 118)
+            state: Two-letter state abbreviation
+            district: House district number
+            last_name: Member's last name
+            
+        Returns:
+            List of matching Bioguide IDs (empty if no member matches)
+            
+        Raises:
+            APIError: If the API request fails
+        """
+        endpoint = f"member/congress/{congress}/{state.upper()}/{district}"
+        url = urljoin(self.base_url, endpoint)
+        params = {'api_key': self.api_key, 'format': 'json', 'limit': 250}
+        
+        try:
+            self.logger.debug(f"Looking up member for Congress {congress}, {state.upper()}-{district}")
+            response = self._make_request_with_retry(url, params)
+            data = response.json()
+        except requests.exceptions.RequestException as e:
+            raise APIError(f"Failed to look up member: {e}") from e
+        except APIError as e:
+            if e.status_code == 404:
+                return []
+            raise
+        
+        members = data.get('members', []) if isinstance(data, dict) else []
+        target = last_name.strip().lower()
+        bioguide_ids = []
+        
+        for member in members:
+            # Names are formatted "Last, First" (e.g., "Thompson, Mike")
+            name = member.get('name', '') or ''
+            member_last_name = name.split(',')[0].strip().lower()
+            bioguide_id = member.get('bioguideId')
+            if bioguide_id and member_last_name == target:
+                bioguide_ids.append(bioguide_id)
+        
+        self.logger.debug(f"Resolved {last_name} {state.upper()}-{district} in Congress {congress} to {bioguide_ids}")
+        return bioguide_ids
+    
     def _make_request_with_retry(self, url: str, params: Dict[str, Any], 
                                 max_retries: int = 3) -> requests.Response:
         """

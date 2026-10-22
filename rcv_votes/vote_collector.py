@@ -4,7 +4,7 @@ Vote collector that orchestrates API calls and web scraping to gather complete v
 
 import time
 import re
-from typing import List, Dict, Any, Generator, Tuple
+from typing import List, Dict, Any, Generator, Set, Tuple
 from dataclasses import asdict
 
 from .models import (VoteRecord, APIVoteData, MemberSearchCriteria,
@@ -37,7 +37,7 @@ class VoteCollector:
         target member's vote (Yea, Nay, Present, Not Voting, or Not on Roll) for each.
         
         Args:
-            search_criteria: Member search criteria (name, state, congress numbers)
+            search_criteria: Member search criteria (name, state, district, congress numbers)
             correlation_id: Unique ID for tracking this operation
             max_votes: Maximum number of votes to collect (for testing)
             
@@ -59,10 +59,22 @@ class VoteCollector:
                 if max_votes and len(all_votes) >= max_votes:
                     break
                     
-                self.logger.info(f"Processing Congress {congress} for {search_criteria.last_name} ({search_criteria.state})")
+                self.logger.info(f"Processing Congress {congress} for {search_criteria.last_name} "
+                                 f"({search_criteria.state}-{search_criteria.district})")
+                
+                # Resolve the member's Bioguide ID(s) for this congress via name, state, district
+                bioguide_ids = self.api_client.get_member_bioguide_ids(
+                    congress, search_criteria.state, search_criteria.district, search_criteria.last_name
+                )
+                if not bioguide_ids:
+                    self.logger.warning(
+                        f"No member named {search_criteria.last_name} found for "
+                        f"{search_criteria.state}-{search_criteria.district} in Congress {congress}; skipping"
+                    )
+                    continue
                 
                 congress_votes = self._collect_congress_votes(
-                    congress, search_criteria.last_name, search_criteria.state, correlation_id, max_votes - len(all_votes) if max_votes else None
+                    congress, set(bioguide_ids), correlation_id, max_votes - len(all_votes) if max_votes else None
                 )
                 
                 all_votes.extend(congress_votes)
@@ -74,12 +86,12 @@ class VoteCollector:
                     self.logger.info(f"Reached maximum vote limit of {max_votes}, stopping collection")
                     break
             
-            # If the member never appears on any roll call, the name/state/congress
+            # If the member never appears on any roll call, the name/state/district/congress
             # inputs are almost certainly wrong; return nothing rather than a file
             # full of "Not on Roll" rows.
             if all_votes and all(v.vote_cast == VOTE_NOT_ON_ROLL for v in all_votes):
                 self.logger.warning(
-                    f"{search_criteria.last_name} ({search_criteria.state}) does not appear "
+                    f"{search_criteria.last_name} ({search_criteria.state}-{search_criteria.district}) does not appear "
                     f"on any of the {len(all_votes)} roll calls collected"
                 )
                 all_votes = []
@@ -97,15 +109,14 @@ class VoteCollector:
                               votes_collected=len(all_votes))
             raise
     
-    def _collect_congress_votes(self, congress: int, last_name: str, state: str, 
+    def _collect_congress_votes(self, congress: int, bioguide_ids: Set[str], 
                                correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
         """
         Collect all roll call votes in a specific congress, with the member's vote on each.
         
         Args:
             congress: Congress number
-            last_name: Member's last name
-            state: Member's state abbreviation
+            bioguide_ids: Bioguide ID(s) identifying the target member
             correlation_id: Operation tracking ID
             max_votes: Maximum number of votes to collect
             
@@ -122,7 +133,7 @@ class VoteCollector:
             self.logger.debug(f"Processing Congress {congress}, Session {session}")
             
             session_votes = self._collect_session_votes(
-                congress, session, last_name, state, correlation_id, max_votes - len(congress_votes) if max_votes else None
+                congress, session, bioguide_ids, correlation_id, max_votes - len(congress_votes) if max_votes else None
             )
             
             congress_votes.extend(session_votes)
@@ -132,16 +143,15 @@ class VoteCollector:
         
         return congress_votes
     
-    def _collect_session_votes(self, congress: int, session: int, last_name: str, 
-                              state: str, correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
+    def _collect_session_votes(self, congress: int, session: int, bioguide_ids: Set[str], 
+                              correlation_id: str, max_votes: int = None) -> List[VoteRecord]:
         """
         Collect all roll call votes in a specific congress session, with the member's vote on each.
         
         Args:
             congress: Congress number
             session: Session number (1 or 2)
-            last_name: Member's last name
-            state: Member's state abbreviation
+            bioguide_ids: Bioguide ID(s) identifying the target member
             correlation_id: Operation tracking ID
             max_votes: Maximum number of votes to collect
             
@@ -173,7 +183,7 @@ class VoteCollector:
                 roll_call_info = api_vote_data[0]
                 
                 # Find the target member's vote (None if member is not on this roll call)
-                member_vote = self._find_member_vote(api_vote_data, last_name, state)
+                member_vote = self._find_member_vote(api_vote_data, bioguide_ids)
                 
                 # Every roll call produces a record, including ones the member missed
                 if member_vote:
@@ -252,21 +262,20 @@ class VoteCollector:
         
         return session_votes
     
-    def _find_member_vote(self, api_vote_data: List[APIVoteData], last_name: str, 
-                         state: str) -> APIVoteData:
+    def _find_member_vote(self, api_vote_data: List[APIVoteData],
+                         bioguide_ids: Set[str]) -> APIVoteData:
         """
         Find the target member's vote in the API response data.
         
         Args:
             api_vote_data: List of all member votes from API
-            last_name: Target member's last name
-            state: Target member's state abbreviation
+            bioguide_ids: Bioguide ID(s) of the target member
             
         Returns:
             The target member's vote data, or None if not found
         """
         for vote_data in api_vote_data:
-            if vote_data.validate_for_member(last_name, state):
+            if vote_data.bio_guide_id in bioguide_ids:
                 return vote_data
         
         return None
